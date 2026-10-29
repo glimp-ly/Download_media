@@ -5,10 +5,8 @@
 (function () {
   "use strict";
 
-  // Si usas GitHub Pages para el frontend y Render para el backend, pega aquí tu URL de Render
-  // (por ejemplo: "https://verdedl-ytdlp.onrender.com"). Si abres directamente la URL de Render,
-  // se detecta sola automáticamente sin necesidad de cambiar nada.
-  const DEFAULT_RENDER_URL = "https://verdedl-ytdlp.onrender.com";
+  // URL activa de tu servicio desplegado en Render
+  const DEFAULT_RENDER_URL = "https://download-media-fhx6.onrender.com";
 
   // Estado de la aplicación
   const state = {
@@ -20,7 +18,7 @@
     noPlaylist: true,
     embedMetadata: false,
     subtitles: false,
-    backendUrl: localStorage.getItem("verdedl_backend_url") || getDefaultBackendUrl(),
+    backendUrl: getInitialBackendUrl(),
     backendOnline: false,
     previewTitle: "",
     isDownloading: false,
@@ -122,6 +120,19 @@
     return "unix";
   }
 
+  function getInitialBackendUrl() {
+    const saved = localStorage.getItem("verdedl_backend_url");
+    // Si antes quedó guardado localhost en el navegador cuando se probó sin Render, actualizar a Render
+    if (
+      saved &&
+      saved !== "http://localhost:8000" &&
+      saved !== "https://verdedl-ytdlp.onrender.com"
+    ) {
+      return saved;
+    }
+    return getDefaultBackendUrl();
+  }
+
   function getDefaultBackendUrl() {
     const host = window.location.hostname.toLowerCase();
     // Si la web se abre directamente desde Render, localhost o servidor propio, usar el mismo origen
@@ -131,8 +142,8 @@
     ) {
       return window.location.origin;
     }
-    // Si se abre desde GitHub Pages, usar la URL de Render configurada
-    return DEFAULT_RENDER_URL || "http://localhost:8000";
+    // Si se abre desde GitHub Pages, usar tu URL de Render activa
+    return DEFAULT_RENDER_URL;
   }
 
   // ==========================================================================

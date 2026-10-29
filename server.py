@@ -26,13 +26,19 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 WEB_ROOT = Path(__file__).resolve().parent
 
 
-def get_ytdlp_version() -> str:
+def _detect_ytdlp_version() -> str:
+    try:
+        import yt_dlp  # type: ignore
+
+        return str(yt_dlp.version.__version__)
+    except Exception:
+        pass
     try:
         res = subprocess.run(
             ["yt-dlp", "--version"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=10,
             check=False,
         )
         if res.returncode == 0:
@@ -40,6 +46,13 @@ def get_ytdlp_version() -> str:
     except Exception:
         pass
     return "installed"
+
+
+YTDLP_VERSION = _detect_ytdlp_version()
+
+
+def get_ytdlp_version() -> str:
+    return YTDLP_VERSION
 
 
 def validate_url(url: str) -> bool:
