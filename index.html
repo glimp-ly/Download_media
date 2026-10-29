@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Herramienta web sencilla e intuitiva para descargar videos y audio en MP4 o MP3 usando yt-dlp. Sin registro ni login." />
+  <meta name="description" content="Descarga videos y audio en MP4 o MP3 de forma directa o genera tu propio comando de yt-dlp. Sin login." />
   <meta name="theme-color" content="#062016" />
-  <title>VerdeDL — Descargador de Videos con yt-dlp (MP4 &amp; MP3)</title>
+  <title>VerdeDL — Descargador de Videos (MP4 &amp; MP3) y Generador yt-dlp</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23059669'/><path d='M50 22v38m0 0l-16-16m16 16l16-16M26 74h48' stroke='%23ecfdf5' stroke-width='9' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>" />
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -14,10 +14,10 @@
   <div class="bg-glow bg-glow-1" aria-hidden="true"></div>
   <div class="bg-glow bg-glow-2" aria-hidden="true"></div>
 
-  <!-- Barra de navegación superior -->
+  <!-- Barra de navegación superior con Apartados -->
   <header class="navbar">
     <div class="container navbar-content">
-      <a href="#" class="brand" aria-label="VerdeDL Inicio">
+      <a href="#descarga-directa" class="brand" id="brandHomeLink" aria-label="VerdeDL Inicio">
         <span class="brand-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 3v12m0 0l-4-4m4 4l4-4" />
@@ -30,11 +30,32 @@
         </div>
       </a>
 
+      <!-- Menú de Apartados (Páginas de la web) -->
+      <nav class="nav-tabs" aria-label="Apartados principales">
+        <button type="button" class="nav-tab active" data-tab="direct" id="tabBtnDirect">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M12 3v12m0 0l-4-4m4 4l4-4" />
+            <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+          </svg>
+          <span>Descarga Directa</span>
+          <span class="tab-pill">Fácil</span>
+        </button>
+
+        <button type="button" class="nav-tab" data-tab="command" id="tabBtnCommand">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+          <span>Generador de Comando</span>
+          <span class="tab-pill">yt-dlp</span>
+        </button>
+      </nav>
+
       <div class="navbar-actions">
-        <!-- Estado del motor yt-dlp para descarga directa -->
-        <button type="button" id="serverStatusBtn" class="server-pill" title="Configurar servidor yt-dlp para descarga directa">
+        <!-- Estado del motor yt-dlp -->
+        <button type="button" id="serverStatusBtn" class="server-pill" title="Estado del servidor de descargas">
           <span class="status-dot" id="serverStatusDot"></span>
-          <span id="serverStatusText">Modo GitHub Pages (Comando)</span>
+          <span id="serverStatusText">Conectando...</span>
         </button>
 
         <!-- Botón de cambio de tema (Verde Bosque Oscuro / Verde Menta Claro) -->
@@ -52,25 +73,40 @@
   </header>
 
   <main class="container main-content">
-    <!-- Hero / Encabezado Principal -->
-    <section class="hero">
+    <!-- ======================================================================
+         ENCABEZADO / HERO DINÁMICO SEGÚN APARTADO
+         ====================================================================== -->
+    <section class="hero" id="heroDirect">
       <div class="hero-pill">
         <span class="pulse-dot"></span>
-        Sin login · Sin publicidad · Impulsado por <strong>yt-dlp</strong>
+        Modo Sencillo · Sin Login · Descarga en 1 clic
       </div>
-      <h1>Descarga videos y audio fácilmente</h1>
+      <h1>Descarga tu video o música al instante</h1>
       <p class="hero-subtitle">
-        Pega el enlace del video, elige entre <strong>MP4 (Video)</strong> o <strong>MP3 (Audio)</strong> y obtén al instante el comando exacto de <code>yt-dlp</code> o descárgalo directamente.
+        Solo pega el enlace del video, elige si lo quieres en <strong>MP4 (Video)</strong> o <strong>MP3 (Audio)</strong> y presiona descargar. Sin comandos ni configuraciones complicadas.
       </p>
     </section>
 
-    <!-- Tarjeta Principal de Descarga y Configuración -->
-    <section class="card main-card" aria-label="Configurador de descarga">
-      <!-- PASO 1: Enlace del video -->
+    <section class="hero hidden" id="heroCommand">
+      <div class="hero-pill">
+        <span class="pulse-dot"></span>
+        Modo Terminal · Personalización completa de <strong>yt-dlp</strong>
+      </div>
+      <h1>Generador de Comandos <code>yt-dlp</code></h1>
+      <p class="hero-subtitle">
+        Configura el formato, la resolución, subtítulos, metadatos o cookies del navegador y obtén el comando exacto de <code>yt-dlp</code> listo para copiar o descargar como script ejecutable.
+      </p>
+    </section>
+
+    <!-- ======================================================================
+         TARJETA PRINCIPAL COMPARTIDA (CON CONTENIDO ADAPTADO A CADA APARTADO)
+         ====================================================================== -->
+    <section class="card main-card" aria-label="Panel principal">
+      <!-- PASO 1: Enlace del video (Común a ambos apartados) -->
       <div class="step-block">
         <div class="step-header">
           <span class="step-number">1</span>
-          <label for="videoUrlInput" class="step-title">Enlace del video o audio</label>
+          <label for="videoUrlInput" class="step-title">Pega el enlace del video</label>
           <span id="platformBadge" class="platform-badge hidden">Sitio detectado</span>
         </div>
 
@@ -121,11 +157,11 @@
 
       <hr class="divider" />
 
-      <!-- PASO 2: Formato (MP4 o MP3) y Opciones -->
+      <!-- PASO 2: Formato (MP4 o MP3) y Calidad -->
       <div class="step-block">
         <div class="step-header">
           <span class="step-number">2</span>
-          <span class="step-title">Formato de descarga</span>
+          <span class="step-title">Elige MP4 (Video) o MP3 (Audio)</span>
         </div>
 
         <!-- Selector grande MP4 vs MP3 -->
@@ -149,7 +185,7 @@
                 <span class="format-name">MP4 · Video</span>
                 <span class="format-tag">Video + Audio</span>
               </div>
-              <p class="format-desc">Descarga el video completo en formato compatible MP4 con audio integrado.</p>
+              <p class="format-desc">Archivo de video compatible con cualquier celular, TV o PC.</p>
             </div>
           </button>
 
@@ -171,34 +207,34 @@
             <div class="format-card-body">
               <div class="format-card-head">
                 <span class="format-name">MP3 · Solo Audio</span>
-                <span class="format-tag">Extracción directa</span>
+                <span class="format-tag">Música / Podcast</span>
               </div>
-              <p class="format-desc">Extrae únicamente la pista de audio convertida a MP3 de alta calidad.</p>
+              <p class="format-desc">Extrae únicamente el audio en formato MP3 ligero y de alta calidad.</p>
             </div>
           </button>
         </div>
 
-        <!-- Opciones adaptativas según MP4 o MP3 -->
-        <div class="options-row">
+        <!-- Selectores de calidad -->
+        <div class="options-row" id="qualityOptionsRow">
           <!-- Selector de Calidad Video (visible en MP4) -->
           <div id="videoQualityGroup" class="option-item">
-            <label for="videoQualitySelect" class="option-label">Resolución máxima (MP4)</label>
+            <label for="videoQualitySelect" class="option-label">Calidad del video (MP4)</label>
             <div class="select-wrapper">
               <select id="videoQualitySelect" class="custom-select">
-                <option value="best" selected>Mejor calidad disponible (Auto)</option>
+                <option value="best" selected>Mejor calidad disponible (Recomendado)</option>
                 <option value="2160">4K Ultra HD (2160p)</option>
                 <option value="1440">2K QHD (1440p)</option>
                 <option value="1080">Full HD (1080p)</option>
                 <option value="720">HD (720p)</option>
                 <option value="480">Estándar (480p)</option>
-                <option value="360">Ligero / Datos móviles (360p)</option>
+                <option value="360">Ahorro de datos (360p)</option>
               </select>
             </div>
           </div>
 
           <!-- Selector de Calidad Audio (visible en MP3) -->
           <div id="audioQualityGroup" class="option-item hidden">
-            <label for="audioQualitySelect" class="option-label">Calidad de audio (MP3)</label>
+            <label for="audioQualitySelect" class="option-label">Calidad del audio (MP3)</label>
             <div class="select-wrapper">
               <select id="audioQualitySelect" class="custom-select">
                 <option value="0" selected>Máxima calidad (320 kbps / VBR 0)</option>
@@ -209,47 +245,126 @@
             </div>
           </div>
 
-          <!-- Sistema operativo para el comando / script -->
-          <div class="option-item">
-            <label for="osTargetSelect" class="option-label">Sistema para el comando</label>
+          <!-- Selector de Sistema Operativo (SOLO visible en apartado Generador de Comando) -->
+          <div id="osTargetGroup" class="option-item hidden">
+            <label for="osTargetSelect" class="option-label">Sistema operativo para tu comando</label>
             <div class="select-wrapper">
               <select id="osTargetSelect" class="custom-select">
-                <option value="unix">Linux / macOS (Bash / Zsh)</option>
+                <option value="unix">Linux / macOS (Terminal Bash / Zsh)</option>
                 <option value="windows">Windows (CMD / PowerShell)</option>
               </select>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Opciones adicionales en chips/toggles sencillos -->
-        <div class="toggles-bar" aria-label="Opciones adicionales de descarga">
+      <hr class="divider" />
+
+      <!-- ====================================================================
+           APARTADO A: DESCARGA DIRECTA (MODO PRINCIPIANTE / BÁSICO)
+           ==================================================================== -->
+      <div id="viewDirectSection" class="step-block">
+        <div class="step-header">
+          <span class="step-number">3</span>
+          <span class="step-title">Descargar archivo a tu dispositivo</span>
+        </div>
+
+        <button type="button" id="directDownloadBtn" class="btn btn-primary btn-xl">
+          <svg class="btn-icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+            <path d="M12 3v12m0 0l-4-4m4 4l4-4" />
+            <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+          </svg>
+          <span id="directDownloadBtnText">Descargar Video MP4 ahora</span>
+        </button>
+
+        <!-- Barra de estado / progreso de descarga -->
+        <div id="downloadStatusPanel" class="status-panel hidden" role="status" aria-live="polite">
+          <div class="status-panel-header">
+            <span class="spinner" id="downloadSpinner"></span>
+            <span id="downloadStatusTitle" class="status-title">Procesando tu descarga...</span>
+          </div>
+          <p id="downloadStatusDetail" class="status-detail"></p>
+          <div class="progress-bar-track" id="progressBarTrack">
+            <div class="progress-bar-fill" id="progressBarFill"></div>
+          </div>
+        </div>
+
+        <!-- Desplegable opcional por si YouTube solicita cookies anti-bot en un video restringido -->
+        <details id="cookiesHelperDetails" class="cookies-details">
+          <summary class="cookies-summary">
+            <span>¿YouTube muestra aviso anti-bot en algún video? (Opcional: Cookies)</span>
+          </summary>
+          <div class="cookies-body">
+            <p class="cookies-help-text">
+              Algunos videos de YouTube bloquean las IPs de servidores en la nube (como Render) pidiendo confirmar que no eres un bot. Si te ocurre con un video específico, puedes pegar aquí el contenido de tus <code>cookies.txt</code> (exportadas con la extensión <em>Get cookies.txt LOCALLY</em>) o usar el apartado <strong>Generador de Comando</strong> en tu PC:
+            </p>
+            <textarea
+              id="customCookiesInput"
+              class="cookies-textarea"
+              rows="3"
+              placeholder="# Netscape HTTP Cookie File (pega aquí el contenido de tu archivo cookies.txt si un video de YouTube lo requiere)..."
+            ></textarea>
+            <div class="cookies-actions">
+              <label class="btn btn-secondary btn-sm file-upload-label">
+                <input type="file" id="cookiesFileInput" accept=".txt" class="hidden" />
+                <span>Cargar archivo cookies.txt</span>
+              </label>
+              <span id="cookiesSavedStatus" class="cookies-status"></span>
+            </div>
+          </div>
+        </details>
+
+        <div class="switch-mode-banner">
+          <span>¿Tienes <code>yt-dlp</code> en tu PC y prefieres el comando para tu terminal?</span>
+          <button type="button" id="goToCommandTabBtn" class="link-btn">Ir al Generador de Comando →</button>
+        </div>
+      </div>
+
+      <!-- ====================================================================
+           APARTADO B: GENERADOR DE COMANDO PROPIO YT-DLP (MODO AVANZADO)
+           ==================================================================== -->
+      <div id="viewCommandSection" class="step-block hidden">
+        <div class="step-header">
+          <span class="step-number">3</span>
+          <span class="step-title">Personaliza y copia tu comando <code>yt-dlp</code></span>
+        </div>
+
+        <!-- Opciones adicionales del comando -->
+        <div class="toggles-bar" aria-label="Opciones del comando yt-dlp">
           <label class="toggle-chip">
             <input type="checkbox" id="optNoPlaylist" checked />
             <span class="chip-box"></span>
-            <span>Solo este video (ignorar playlist)</span>
+            <span>Solo este video (<code>--no-playlist</code>)</span>
           </label>
 
           <label class="toggle-chip">
             <input type="checkbox" id="optEmbedMetadata" />
             <span class="chip-box"></span>
-            <span>Incrustar miniatura y metadatos</span>
+            <span>Incrustar miniatura y datos (<code>--embed-thumbnail</code>)</span>
           </label>
 
           <label class="toggle-chip" id="subtitlesChipWrap">
             <input type="checkbox" id="optSubtitles" />
             <span class="chip-box"></span>
-            <span>Descargar subtítulos (ES/EN)</span>
+            <span>Subtítulos ES/EN (<code>--embed-subs</code>)</span>
           </label>
         </div>
-      </div>
 
-      <hr class="divider" />
-
-      <!-- PASO 3: Comando yt-dlp generado y Descarga -->
-      <div class="step-block">
-        <div class="step-header">
-          <span class="step-number">3</span>
-          <span class="step-title">Comando <code>yt-dlp</code> armado y Descarga</span>
+        <!-- Selector opcional de Cookies del navegador para el comando local -->
+        <div class="option-item">
+          <label for="browserCookiesSelect" class="option-label">
+            Autenticación anti-bot desde tu navegador (<code>--cookies-from-browser</code>)
+          </label>
+          <div class="select-wrapper">
+            <select id="browserCookiesSelect" class="custom-select">
+              <option value="none" selected>Sin cookies (Descarga estándar)</option>
+              <option value="chrome">Usar sesión de Google Chrome (--cookies-from-browser chrome)</option>
+              <option value="brave">Usar sesión de Brave (--cookies-from-browser brave)</option>
+              <option value="edge">Usar sesión de Microsoft Edge (--cookies-from-browser edge)</option>
+              <option value="firefox">Usar sesión de Mozilla Firefox (--cookies-from-browser firefox)</option>
+              <option value="opera">Usar sesión de Opera (--cookies-from-browser opera)</option>
+            </select>
+          </div>
         </div>
 
         <!-- Caja de comando estilo terminal -->
@@ -276,46 +391,33 @@
                   <line x1="12" y1="18" x2="12" y2="12" />
                   <polyline points="9 15 12 18 15 15" />
                 </svg>
-                <span id="scriptExtLabel">Script .sh</span>
+                <span id="scriptExtLabel">Descargar .sh</span>
               </button>
             </div>
           </div>
 
-          <pre class="terminal-code-wrap"><code id="ytdlpCommandOutput" class="terminal-code">yt-dlp -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b" --merge-output-format mp4 --no-playlist -o "%(title)s.%(ext)s" "https://www.youtube.com/watch?v=dQw4w9WgXcQ"</code></pre>
+          <pre class="terminal-code-wrap"><code id="ytdlpCommandOutput" class="terminal-code"></code></pre>
 
           <!-- Desglose interactivo de qué hace cada parte del comando -->
           <div class="cmd-breakdown" id="cmdBreakdown"></div>
         </div>
 
-        <!-- Botones de acción principales -->
         <div class="action-buttons">
-          <button type="button" id="directDownloadBtn" class="btn btn-primary btn-lg">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3">
-              <path d="M12 3v12m0 0l-4-4m4 4l4-4" />
-              <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+          <button type="button" id="copyPrimaryBtn" class="btn btn-primary btn-lg">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
             </svg>
-            <span id="directDownloadBtnText">Descargar MP4 ahora</span>
+            <span>Copiar Comando yt-dlp</span>
           </button>
 
-          <button type="button" id="copyPrimaryBtn" class="btn btn-outline btn-lg">
+          <button type="button" id="downloadScriptPrimaryBtn" class="btn btn-outline btn-lg">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="4 17 10 11 4 5" />
               <line x1="12" y1="19" x2="20" y2="19" />
             </svg>
-            <span>Copiar comando yt-dlp</span>
+            <span id="scriptPrimaryBtnText">Descargar Script Ejecutable</span>
           </button>
-        </div>
-
-        <!-- Barra de estado / progreso de descarga -->
-        <div id="downloadStatusPanel" class="status-panel hidden" role="status" aria-live="polite">
-          <div class="status-panel-header">
-            <span class="spinner" id="downloadSpinner"></span>
-            <span id="downloadStatusTitle" class="status-title">Procesando con yt-dlp...</span>
-          </div>
-          <p id="downloadStatusDetail" class="status-detail"></p>
-          <div class="progress-bar-track" id="progressBarTrack">
-            <div class="progress-bar-fill" id="progressBarFill"></div>
-          </div>
         </div>
       </div>
     </section>
@@ -324,29 +426,16 @@
     <section id="historySection" class="card secondary-card hidden" aria-label="Historial reciente">
       <div class="section-header">
         <div>
-          <h2 class="section-title">Comandos y descargas recientes</h2>
-          <p class="section-subtitle">Guardado solo en tu navegador (sin cuentas ni servidores externos).</p>
+          <h2 class="section-title">Actividad reciente</h2>
+          <p class="section-subtitle">Guardado localmente en tu navegador (sin cuentas ni registro).</p>
         </div>
         <button type="button" id="clearHistoryBtn" class="btn btn-ghost btn-sm">Limpiar historial</button>
       </div>
       <div id="historyList" class="history-list"></div>
     </section>
 
-    <!-- Guía rápida de uso -->
-    <section class="info-grid" aria-label="Información de uso">
-      <article class="card info-card">
-        <div class="info-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="4 17 10 11 4 5" />
-            <line x1="12" y1="19" x2="20" y2="19" />
-          </svg>
-        </div>
-        <h3>1. Por Comando o Script</h3>
-        <p>
-          Funciona 100% desde <strong>GitHub Pages</strong>. Pega tu enlace, elige <strong>MP4</strong> o <strong>MP3</strong> y copia el comando optimizado de <code>yt-dlp</code> o descarga el script ejecutable.
-        </p>
-      </article>
-
+    <!-- Tarjetas explicativas de los dos apartados -->
+    <section class="info-grid" aria-label="Apartados de la plataforma">
       <article class="card info-card">
         <div class="info-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -354,9 +443,22 @@
             <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
           </svg>
         </div>
-        <h3>2. Descarga Directa en Web</h3>
+        <h3>Apartado 1: Descarga Directa</h3>
         <p>
-          Si ejecutas el servidor incluido (<code>python3 server.py</code>), el botón <strong>Descargar ahora</strong> procesa el video con <code>yt-dlp</code> y guarda el archivo MP4 o MP3 directo en tu equipo.
+          Pensado para usuarios básicos. Pegas el enlace, eliges <strong>MP4</strong> o <strong>MP3</strong> y el archivo se descarga directamente a tu celular o PC.
+        </p>
+      </article>
+
+      <article class="card info-card">
+        <div class="info-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+        </div>
+        <h3>Apartado 2: Generador de Comando</h3>
+        <p>
+          Arma tu comando personalizado de <code>yt-dlp</code> con banderas de calidad, subtítulos, metadatos y cookies de tu navegador listo para ejecutar.
         </p>
       </article>
 
@@ -366,9 +468,9 @@
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
           </svg>
         </div>
-        <h3>3. Sin Login &amp; +1000 Sitios</h3>
+        <h3>Sin Login &amp; +1000 Sitios</h3>
         <p>
-          Compatible con YouTube, TikTok, Vimeo, Twitch, X (Twitter), SoundCloud, Instagram y más de mil plataformas soportadas por <code>yt-dlp</code>.
+          Compatible con YouTube, TikTok, Vimeo, Twitch, X (Twitter), Instagram, SoundCloud, Facebook y todas las plataformas soportadas por <code>yt-dlp</code>.
         </p>
       </article>
     </section>
@@ -378,7 +480,7 @@
   <div id="serverModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal-card">
       <div class="modal-header">
-        <h2 id="modalTitle">Conexión con motor yt-dlp</h2>
+        <h2 id="modalTitle">Estado del Servidor de Descargas</h2>
         <button type="button" id="closeModalBtn" class="icon-btn" aria-label="Cerrar ventana">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12" />
@@ -388,11 +490,11 @@
 
       <div class="modal-body">
         <p class="modal-text">
-          Dado que <strong>GitHub Pages</strong> aloja sitios estáticos, el generador de comandos funciona siempre sin servidores. Para habilitar también la <strong>descarga directa del archivo en el navegador</strong>, conecta el backend local o remoto con <code>yt-dlp</code>:
+          El apartado de <strong>Descarga Directa</strong> está conectado a tu servidor <code>yt-dlp</code> en Render (o puedes apuntarlo a <code>http://localhost:8000</code> si corres <code>python3 server.py</code> en tu PC):
         </p>
 
         <div class="modal-field">
-          <label for="backendUrlInput" class="option-label">URL del servidor yt-dlp</label>
+          <label for="backendUrlInput" class="option-label">URL del servidor yt-dlp activo</label>
           <div class="url-input-group">
             <input
               type="url"
@@ -405,15 +507,6 @@
           </div>
           <p id="backendTestResult" class="modal-hint"></p>
         </div>
-
-        <div class="modal-instructions">
-          <h3>¿Cómo iniciar el servidor local incluido?</h3>
-          <p>En la carpeta de este proyecto ejecuta:</p>
-          <pre class="mini-code"><code>python3 server.py</code></pre>
-          <p class="modal-subtext">
-            Esto activa el motor <code>yt-dlp</code> en <code>http://localhost:8000</code> con permiso CORS para funcionar incluso desde tu página publicada en GitHub Pages.
-          </p>
-        </div>
       </div>
     </div>
   </div>
@@ -425,8 +518,8 @@
 
   <footer class="footer">
     <div class="container footer-content">
-      <p><strong>VerdeDL</strong> · Interfaz web para <code>yt-dlp</code> · Diseñada para GitHub Pages</p>
-      <p class="footer-note">Sin cuentas · Sin rastreo · Código abierto</p>
+      <p><strong>VerdeDL</strong> · Descargas Directas y Generador de Comandos <code>yt-dlp</code></p>
+      <p class="footer-note">Sin cuentas · Sin rastreo · Paleta Verde Responsiva</p>
     </div>
   </footer>
 

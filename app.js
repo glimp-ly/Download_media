@@ -1,5 +1,7 @@
 /* ==========================================================================
-   VerdeDL — Lógica Principal (Generador yt-dlp + Descarga Directa + Preview)
+   VerdeDL — Lógica Principal
+   Apartado 1: Descarga Directa (Principiantes)
+   Apartado 2: Generador de Comandos yt-dlp (Avanzado)
    ========================================================================== */
 
 (function () {
@@ -10,6 +12,7 @@
 
   // Estado de la aplicación
   const state = {
+    activeTab: "direct", // 'direct' | 'command'
     url: "",
     format: "mp4", // 'mp4' | 'mp3'
     videoQuality: "best",
@@ -18,6 +21,8 @@
     noPlaylist: true,
     embedMetadata: false,
     subtitles: false,
+    browserCookies: "none",
+    customCookiesText: localStorage.getItem("verdedl_cookies_txt") || "",
     backendUrl: getInitialBackendUrl(),
     backendOnline: false,
     previewTitle: "",
@@ -26,6 +31,18 @@
 
   // Referencias al DOM
   const els = {
+    brandHomeLink: document.getElementById("brandHomeLink"),
+    tabBtnDirect: document.getElementById("tabBtnDirect"),
+    tabBtnCommand: document.getElementById("tabBtnCommand"),
+    goToCommandTabBtn: document.getElementById("goToCommandTabBtn"),
+
+    heroDirect: document.getElementById("heroDirect"),
+    heroCommand: document.getElementById("heroCommand"),
+    viewDirectSection: document.getElementById("viewDirectSection"),
+    viewCommandSection: document.getElementById("viewCommandSection"),
+    qualityOptionsRow: document.getElementById("qualityOptionsRow"),
+    osTargetGroup: document.getElementById("osTargetGroup"),
+
     videoUrlInput: document.getElementById("videoUrlInput"),
     clearUrlBtn: document.getElementById("clearUrlBtn"),
     pasteUrlBtn: document.getElementById("pasteUrlBtn"),
@@ -51,6 +68,12 @@
     optEmbedMetadata: document.getElementById("optEmbedMetadata"),
     optSubtitles: document.getElementById("optSubtitles"),
     subtitlesChipWrap: document.getElementById("subtitlesChipWrap"),
+    browserCookiesSelect: document.getElementById("browserCookiesSelect"),
+
+    cookiesHelperDetails: document.getElementById("cookiesHelperDetails"),
+    customCookiesInput: document.getElementById("customCookiesInput"),
+    cookiesFileInput: document.getElementById("cookiesFileInput"),
+    cookiesSavedStatus: document.getElementById("cookiesSavedStatus"),
 
     terminalModeLabel: document.getElementById("terminalModeLabel"),
     ytdlpCommandOutput: document.getElementById("ytdlpCommandOutput"),
@@ -59,7 +82,9 @@
     copyCmdText: document.getElementById("copyCmdText"),
     copyPrimaryBtn: document.getElementById("copyPrimaryBtn"),
     downloadScriptBtn: document.getElementById("downloadScriptBtn"),
+    downloadScriptPrimaryBtn: document.getElementById("downloadScriptPrimaryBtn"),
     scriptExtLabel: document.getElementById("scriptExtLabel"),
+    scriptPrimaryBtnText: document.getElementById("scriptPrimaryBtnText"),
 
     directDownloadBtn: document.getElementById("directDownloadBtn"),
     directDownloadBtnText: document.getElementById("directDownloadBtnText"),
@@ -101,12 +126,24 @@
     els.osTargetSelect.value = state.osTarget;
     els.backendUrlInput.value = state.backendUrl;
 
+    if (state.customCookiesText) {
+      els.customCookiesInput.value = state.customCookiesText;
+      els.cookiesSavedStatus.textContent = "Cookies cargadas listas para usar";
+    }
+
+    // Detectar si la URL tiene hash #comando o #descarga-directa
+    if (window.location.hash === "#comando") {
+      setActiveTab("command");
+    } else {
+      setActiveTab("direct");
+    }
+
     bindEvents();
     updateUI();
     renderHistory();
     checkBackendStatus();
 
-    // Ping preventivo cada 10 minutos para evitar que Render entre en suspensión por inactividad
+    // Ping preventivo cada 10 minutos para mantener Render despierto
     setInterval(() => {
       if (state.backendUrl) {
         checkBackendStatus(true);
@@ -122,7 +159,6 @@
 
   function getInitialBackendUrl() {
     const saved = localStorage.getItem("verdedl_backend_url");
-    // Si antes quedó guardado localhost en el navegador cuando se probó sin Render, actualizar a Render
     if (
       saved &&
       saved !== "http://localhost:8000" &&
@@ -135,15 +171,34 @@
 
   function getDefaultBackendUrl() {
     const host = window.location.hostname.toLowerCase();
-    // Si la web se abre directamente desde Render, localhost o servidor propio, usar el mismo origen
-    if (
-      window.location.protocol.startsWith("http") &&
-      !host.endsWith(".github.io")
-    ) {
+    if (window.location.protocol.startsWith("http") && !host.endsWith(".github.io")) {
       return window.location.origin;
     }
-    // Si se abre desde GitHub Pages, usar tu URL de Render activa
     return DEFAULT_RENDER_URL;
+  }
+
+  // ==========================================================================
+  // Navegación entre Apartados (Descarga Directa vs Generador de Comando)
+  // ==========================================================================
+  function setActiveTab(tab) {
+    state.activeTab = tab === "command" ? "command" : "direct";
+    const isDirect = state.activeTab === "direct";
+
+    els.tabBtnDirect.classList.toggle("active", isDirect);
+    els.tabBtnCommand.classList.toggle("active", !isDirect);
+
+    els.heroDirect.classList.toggle("hidden", !isDirect);
+    els.heroCommand.classList.toggle("hidden", isDirect);
+
+    els.viewDirectSection.classList.toggle("hidden", !isDirect);
+    els.viewCommandSection.classList.toggle("hidden", isDirect);
+
+    // En modo Descarga Directa (Principiante) ocultamos el selector de SO de terminal
+    els.osTargetGroup.classList.toggle("hidden", isDirect);
+    els.qualityOptionsRow.classList.toggle("single-col", isDirect);
+
+    history.replaceState(null, "", isDirect ? "#descarga-directa" : "#comando");
+    updateUI();
   }
 
   // ==========================================================================
@@ -170,6 +225,17 @@
   // Eventos de Interfaz
   // ==========================================================================
   function bindEvents() {
+    // Pestañas de Apartados
+    els.tabBtnDirect.addEventListener("click", () => setActiveTab("direct"));
+    els.tabBtnCommand.addEventListener("click", () => setActiveTab("command"));
+    els.brandHomeLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      setActiveTab("direct");
+    });
+    if (els.goToCommandTabBtn) {
+      els.goToCommandTabBtn.addEventListener("click", () => setActiveTab("command"));
+    }
+
     // Input de enlace
     els.videoUrlInput.addEventListener("input", (e) => {
       handleUrlChange(e.target.value.trim());
@@ -215,7 +281,7 @@
       updateUI();
     });
 
-    // Opciones adicionales
+    // Opciones del Generador de Comando
     els.optNoPlaylist.addEventListener("change", (e) => {
       state.noPlaylist = e.target.checked;
       updateUI();
@@ -231,10 +297,45 @@
       updateUI();
     });
 
+    els.browserCookiesSelect.addEventListener("change", (e) => {
+      state.browserCookies = e.target.value;
+      updateUI();
+    });
+
+    // Cookies opcionales para descarga directa
+    els.customCookiesInput.addEventListener("input", (e) => {
+      state.customCookiesText = e.target.value.trim();
+      if (state.customCookiesText) {
+        localStorage.setItem("verdedl_cookies_txt", state.customCookiesText);
+        els.cookiesSavedStatus.textContent = "Cookies guardadas en tu navegador";
+      } else {
+        localStorage.removeItem("verdedl_cookies_txt");
+        els.cookiesSavedStatus.textContent = "";
+      }
+    });
+
+    els.cookiesFileInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const content = String(reader.result || "").trim();
+        state.customCookiesText = content;
+        els.customCookiesInput.value = content;
+        localStorage.setItem("verdedl_cookies_txt", content);
+        els.cookiesSavedStatus.textContent = `Archivo ${file.name} cargado correctamente`;
+        showToast("Archivo cookies.txt cargado");
+      };
+      reader.readAsText(file);
+    });
+
     // Copiar comando y descargar script
     els.copyCmdBtn.addEventListener("click", () => copyGeneratedCommand());
     els.copyPrimaryBtn.addEventListener("click", () => copyGeneratedCommand());
     els.downloadScriptBtn.addEventListener("click", () => downloadExecutableScript());
+    if (els.downloadScriptPrimaryBtn) {
+      els.downloadScriptPrimaryBtn.addEventListener("click", () => downloadExecutableScript());
+    }
 
     // Descarga directa
     els.directDownloadBtn.addEventListener("click", () => triggerDirectDownload());
@@ -266,14 +367,13 @@
       if (!cleanUrl) return;
       state.backendUrl = cleanUrl;
       localStorage.setItem("verdedl_backend_url", cleanUrl);
-      els.backendTestResult.textContent = "Verificando conexión con yt-dlp...";
+      els.backendTestResult.textContent = "Verificando conexión con el servidor...";
       const online = await checkBackendStatus();
       if (online) {
-        els.backendTestResult.textContent = "¡Conectado! El servidor yt-dlp está listo para descargas directas.";
+        els.backendTestResult.textContent = "¡Conectado! El servidor yt-dlp está listo.";
         showToast("Servidor yt-dlp conectado");
       } else {
-        els.backendTestResult.textContent =
-          "No se detectó respuesta en esa URL. Asegúrate de ejecutar: python3 server.py";
+        els.backendTestResult.textContent = "No se detectó respuesta en esa URL.";
       }
     });
 
@@ -350,14 +450,34 @@
     if (host.includes("dailymotion.com")) return "Dailymotion";
     if (host.includes("reddit.com") || host.includes("redd.it")) return "Reddit";
     if (host.includes("bilibili.com")) return "Bilibili";
-    return " Enlace Web Compatible";
+    return "Enlace Compatible";
   }
 
   // ==========================================================================
-  // Vista Previa del Video (Backend yt-dlp o Fallback Estático oEmbed)
+  // Vista Previa del Video (oEmbed rápido + Backend yt-dlp)
   // ==========================================================================
   async function fetchVideoPreview(url, platformLabel) {
-    // 1. Si el backend yt-dlp está activo, obtener metadatos completos
+    // 1. Vista previa rápida por Noembed (instantánea y no bloqueada por IPs de datacenter)
+    try {
+      const oembedRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+      if (oembedRes.ok) {
+        const meta = await oembedRes.json();
+        if (meta && meta.title) {
+          renderPreviewCard({
+            title: meta.title,
+            author: meta.author_name || meta.provider_name || platformLabel,
+            thumbnail: meta.thumbnail_url || "",
+            duration: "",
+            extractor: meta.provider_name || platformLabel,
+          });
+          return;
+        }
+      }
+    } catch {
+      // Continuar al backend si no soporta oEmbed
+    }
+
+    // 2. Respaldo mediante backend yt-dlp
     if (state.backendOnline) {
       try {
         const res = await fetch(`${state.backendUrl}/api/info?url=${encodeURIComponent(url)}`);
@@ -375,28 +495,8 @@
           }
         }
       } catch {
-        // Continúa al fallback estático si falla
+        // Silencioso
       }
-    }
-
-    // 2. Fallback 100% estático para GitHub Pages usando Noembed (YouTube, Vimeo, TikTok, SoundCloud, etc.)
-    try {
-      const oembedRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
-      if (oembedRes.ok) {
-        const meta = await oembedRes.json();
-        if (meta && meta.title) {
-          renderPreviewCard({
-            title: meta.title,
-            author: meta.author_name || meta.provider_name || platformLabel,
-            thumbnail: meta.thumbnail_url || "",
-            duration: "",
-            extractor: meta.provider_name || platformLabel,
-          });
-          return;
-        }
-      }
-    } catch {
-      // Silencioso si no soporta oEmbed
     }
 
     els.videoPreviewCard.classList.add("hidden");
@@ -485,7 +585,6 @@
         desc: "Empaqueta el archivo final en contenedor .mp4",
       });
     } else {
-      // Formato MP3 (Audio)
       parts.push("-x", "--audio-format mp3", `--audio-quality ${state.audioQuality}`);
       explanations.push({
         flag: "-x --audio-format mp3",
@@ -500,7 +599,6 @@
       });
     }
 
-    // Playlist
     if (state.noPlaylist) {
       parts.push("--no-playlist");
       explanations.push({
@@ -515,7 +613,6 @@
       });
     }
 
-    // Metadatos y miniatura
     if (state.embedMetadata) {
       parts.push("--embed-thumbnail", "--embed-metadata");
       explanations.push({
@@ -524,7 +621,6 @@
       });
     }
 
-    // Subtítulos (solo en MP4)
     if (state.format === "mp4" && state.subtitles) {
       parts.push("--write-subs", "--embed-subs", '--sub-langs "es.*,en.*"');
       explanations.push({
@@ -533,14 +629,20 @@
       });
     }
 
-    // Plantilla de nombre de archivo limpio
+    if (state.browserCookies && state.browserCookies !== "none") {
+      parts.push(`--cookies-from-browser ${state.browserCookies}`);
+      explanations.push({
+        flag: `--cookies-from-browser ${state.browserCookies}`,
+        desc: `Usa tu sesión de ${state.browserCookies} para evitar bloqueos anti-bot`,
+      });
+    }
+
     parts.push('-o "%(title)s.%(ext)s"');
     explanations.push({
       flag: '-o "%(title)s.%(ext)s"',
       desc: "Guarda el archivo con el título original del video",
     });
 
-    // URL al final entre comillas seguras
     const safeUrl = targetUrl.replace(/"/g, '\\"');
     parts.push(`"${safeUrl}"`);
 
@@ -555,11 +657,16 @@
     els.ytdlpCommandOutput.textContent = command;
 
     const upperFormat = state.format.toUpperCase();
+    const labelType = state.format === "mp4" ? "Video MP4" : "Audio MP3";
     els.terminalModeLabel.textContent = `Terminal · Comando yt-dlp (${upperFormat})`;
-    els.directDownloadBtnText.textContent = `Descargar ${upperFormat} ahora`;
-    els.scriptExtLabel.textContent = state.osTarget === "windows" ? "Script .bat" : "Script .sh";
+    els.directDownloadBtnText.textContent = `Descargar ${labelType} ahora`;
 
-    // Renderizar chips explicativos del comando
+    const ext = state.osTarget === "windows" ? ".bat" : ".sh";
+    els.scriptExtLabel.textContent = `Descargar ${ext}`;
+    if (els.scriptPrimaryBtnText) {
+      els.scriptPrimaryBtnText.textContent = `Descargar Script (${ext})`;
+    }
+
     els.cmdBreakdown.innerHTML = explanations
       .map(
         (item) =>
@@ -668,12 +775,11 @@
   async function checkBackendStatus(silent = false) {
     const isRemoteRender = state.backendUrl.includes("onrender.com");
     if (!silent && isRemoteRender && !state.backendOnline) {
-      els.serverStatusText.textContent = "Conectando / Despertando Render...";
+      els.serverStatusText.textContent = "Conectando con servidor...";
     }
 
     try {
       const controller = new AbortController();
-      // 45s de margen si es Render (por si está despertando del modo reposo), 4s si es local
       const timeoutMs = isRemoteRender ? 45000 : 4000;
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(`${state.backendUrl}/api/health`, {
@@ -698,10 +804,10 @@
   function updateServerStatusBadge() {
     if (state.backendOnline) {
       els.serverStatusDot.classList.add("online");
-      els.serverStatusText.textContent = "Motor yt-dlp Conectado (Descarga directa activa)";
+      els.serverStatusText.textContent = "Servidor Activo";
     } else {
       els.serverStatusDot.classList.remove("online");
-      els.serverStatusText.textContent = "Modo GitHub Pages (Comando / Conectar servidor)";
+      els.serverStatusText.textContent = "Servidor en reposo / Configurar";
     }
   }
 
@@ -726,26 +832,31 @@
     const { command } = buildYtdlpCommand();
     saveToHistory(state.url, state.format, command);
 
-    // Verificar si el servidor yt-dlp está activo
-    const isOnline = await checkBackendStatus();
-    if (!isOnline) {
-      // Si se está ejecutando en GitHub Pages sin servidor local activo,
-      // copiamos el comando y mostramos el modal con opciones claras
-      await copyGeneratedCommand();
-      els.serverModal.classList.remove("hidden");
-      els.backendTestResult.textContent =
-        "El comando ya fue copiado a tu portapapeles. Para descargar el archivo directo en el navegador, inicia python3 server.py.";
-      return;
-    }
-
-    // Descarga directa real mediante el servidor yt-dlp
     state.isDownloading = true;
     els.directDownloadBtn.disabled = true;
     els.downloadStatusPanel.classList.remove("hidden");
     els.downloadSpinner.classList.remove("hidden");
-    els.downloadStatusTitle.textContent = `Descargando y procesando ${state.format.toUpperCase()} con yt-dlp...`;
-    els.downloadStatusDetail.textContent = `Ejecutando: ${command}`;
-    els.progressBarFill.style.width = "45%";
+    els.downloadStatusTitle.textContent = `Preparando tu archivo ${state.format.toUpperCase()}...`;
+    els.downloadStatusDetail.textContent = "Conectando con el motor de descarga...";
+    els.progressBarFill.style.width = "30%";
+
+    const isOnline = await checkBackendStatus();
+    if (!isOnline) {
+      state.isDownloading = false;
+      els.directDownloadBtn.disabled = false;
+      els.downloadSpinner.classList.add("hidden");
+      els.progressBarFill.style.width = "0%";
+      els.downloadStatusTitle.textContent = "El servidor de descargas no respondió";
+      els.downloadStatusDetail.textContent =
+        "Verifica la conexión del servidor o usa el apartado Generador de Comando.";
+      return;
+    }
+
+    els.progressBarFill.style.width = "55%";
+    els.downloadStatusTitle.textContent = `Descargando ${state.format.toUpperCase()}... (esto puede tardar unos segundos)`;
+    els.downloadStatusDetail.textContent = state.previewTitle
+      ? `Procesando: ${state.previewTitle}`
+      : "Obteniendo flujo de audio/video...";
 
     try {
       const response = await fetch(`${state.backendUrl}/api/download`, {
@@ -759,11 +870,12 @@
           noPlaylist: state.noPlaylist,
           embedMetadata: state.embedMetadata,
           subtitles: state.subtitles,
+          cookiesText: state.customCookiesText || "",
         }),
       });
 
       if (!response.ok) {
-        let errMessage = "No se pudo completar la descarga con yt-dlp.";
+        let errMessage = "No se pudo completar la descarga.";
         try {
           const errData = await response.json();
           if (errData && errData.error) errMessage = errData.error;
@@ -773,11 +885,11 @@
         throw new Error(errMessage);
       }
 
-      els.progressBarFill.style.width = "90%";
-      els.downloadStatusTitle.textContent = "Preparando archivo para guardar en tu dispositivo...";
+      els.progressBarFill.style.width = "92%";
+      els.downloadStatusTitle.textContent = "¡Listo! Guardando archivo en tu dispositivo...";
 
       const blob = await response.blob();
-      const filename = extractFilenameFromHeaders(response.headers) || `video_descargado.${state.format}`;
+      const filename = extractFilenameFromHeaders(response.headers) || `descarga.${state.format}`;
 
       const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -791,14 +903,18 @@
       els.progressBarFill.style.width = "100%";
       els.downloadSpinner.classList.add("hidden");
       els.downloadStatusTitle.textContent = `¡Descarga completada! (${filename})`;
-      els.downloadStatusDetail.textContent = "El archivo se ha guardado en tu carpeta de descargas.";
+      els.downloadStatusDetail.textContent = "Revisa tu carpeta de descargas.";
       showToast(`¡Archivo ${state.format.toUpperCase()} descargado!`);
     } catch (err) {
       els.downloadSpinner.classList.add("hidden");
       els.progressBarFill.style.width = "0%";
-      els.downloadStatusTitle.textContent = "Error al procesar la descarga directa";
-      els.downloadStatusDetail.textContent =
-        err.message || "Verifica el enlace o usa el comando yt-dlp copiado.";
+      els.downloadStatusTitle.textContent = "No se pudo descargar directamente este video";
+      const msg = err.message || "";
+      els.downloadStatusDetail.textContent = msg;
+
+      if (msg.toLowerCase().includes("bot") || msg.toLowerCase().includes("cookies")) {
+        els.cookiesHelperDetails.open = true;
+      }
     } finally {
       state.isDownloading = false;
       els.directDownloadBtn.disabled = false;
@@ -873,8 +989,8 @@
             <div class="history-cmd">${escapeHtml(item.command)}</div>
           </div>
           <div class="history-actions">
-            <button type="button" class="btn btn-secondary btn-sm" data-history-load="${idx}">Reutilizar</button>
-            <button type="button" class="btn btn-outline btn-sm" data-history-copy="${idx}">Copiar</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-history-load="${idx}">Cargar enlace</button>
+            <button type="button" class="btn btn-outline btn-sm" data-history-copy="${idx}">Copiar comando</button>
           </div>
         </div>
       `
@@ -923,6 +1039,5 @@
       .replace(/'/g, "&#039;");
   }
 
-  // Iniciar aplicación
   document.addEventListener("DOMContentLoaded", init);
 })();

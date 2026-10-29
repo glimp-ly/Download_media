@@ -2,12 +2,8 @@
 """
 VerdeDL — Servidor Backend yt-dlp para Descarga Directa (MP4 / MP3)
 -------------------------------------------------------------------
-Sirve la web estática localmente y expone una API con CORS habilitado
-para que tanto en local como desde GitHub Pages puedas descargar el
-archivo MP4 o MP3 directamente en el navegador usando yt-dlp.
-
-Uso:
-    python3 server.py
+Sirve la web estática y expone los endpoints /api/health, /api/info y /api/download
+con soporte multi-cliente anti-bot para YouTube en servidores de nube (Render).
 """
 
 import json
@@ -33,18 +29,6 @@ def _detect_ytdlp_version() -> str:
         return str(yt_dlp.version.__version__)
     except Exception:
         pass
-    try:
-        res = subprocess.run(
-            ["yt-dlp", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if res.returncode == 0:
-            return res.stdout.strip()
-    except Exception:
-        pass
     return "installed"
 
 
@@ -62,12 +46,17 @@ def validate_url(url: str) -> bool:
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
+def is_youtube_url(url: str) -> bool:
+    host = urllib.parse.urlparse(url).hostname or ""
+    host = host.lower()
+    return "youtube.com" in host or "youtu.be" in host
+
+
 class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
 
     def end_headers(self):
-        # Cabeceras CORS para permitir conexión desde GitHub Pages
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept")
@@ -119,6 +108,8 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                 "--dump-single-json",
                 "--no-playlist",
                 "--no-warnings",
+                "--extractor-args",
+                "youtube:player_client=web_embedded,ios,mweb,tv",
                 url,
             ]
             proc = subprocess.run(
@@ -150,6 +141,57 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
         except Exception as exc:
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
+    def _build_base_ytdlp_args(
+        self,
+        fmt: str,
+        video_quality: str,
+        audio_quality: str,
+        no_playlist: bool,
+        embed_metadata: bool,
+        subtitles: bool,
+        output_template: str,
+        cookies_file: str | None,
+    ) -> list[str]:
+        args = [
+            "yt-dlp",
+            "--no-playlist" if no_playlist else "--yes-playlist",
+            "--no-part",
+            "--geo-bypass",
+        ]
+
+        if cookies_file:
+            args.extend(["--cookies", cookies_file])
+
+        if fmt == "mp4":
+            if video_quality.isdigit():
+                h = video_quality
+                args.extend(
+                    [
+                        "-f",
+                        f"bv*[height<={h}][ext=mp4]+ba[ext=m4a]/b[height<={h}][ext=mp4] / bv*[height<={h}]+ba/b[height<={h}] / b",
+                    ]
+                )
+            else:
+                args.extend(
+                    [
+                        "-f",
+                        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b / b",
+                    ]
+                )
+            args.extend(["--merge-output-format", "mp4"])
+        else:
+            valid_aq = audio_quality if audio_quality in ("0", "192K", "128K", "96K") else "0"
+            args.extend(["-x", "--audio-format", "mp3", "--audio-quality", valid_aq])
+
+        if embed_metadata:
+            args.extend(["--embed-thumbnail", "--embed-metadata"])
+
+        if fmt == "mp4" and subtitles:
+            args.extend(["--write-subs", "--embed-subs", "--sub-langs", "es.*,en.*"])
+
+        args.extend(["-o", output_template])
+        return args
+
     def _handle_download(self):
         try:
             content_len = int(self.headers.get("Content-Length", "0"))
@@ -170,67 +212,89 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
         no_playlist = bool(payload.get("noPlaylist", True))
         embed_metadata = bool(payload.get("embedMetadata", False))
         subtitles = bool(payload.get("subtitles", False))
+        cookies_text = str(payload.get("cookiesText") or os.environ.get("YTDLP_COOKIES") or "").strip()
 
         with tempfile.TemporaryDirectory(prefix="verdedl_") as tmpdir:
+            cookies_file = None
+            if cookies_text:
+                cookies_file = os.path.join(tmpdir, "cookies.txt")
+                with open(cookies_file, "w", encoding="utf-8") as cf:
+                    cf.write(cookies_text + "\n")
+
             output_template = os.path.join(tmpdir, "%(title).120s.%(ext)s")
-            cmd = ["yt-dlp", "--no-playlist" if no_playlist else "--yes-playlist", "--no-part"]
+            base_args = self._build_base_ytdlp_args(
+                fmt=fmt,
+                video_quality=video_quality,
+                audio_quality=audio_quality,
+                no_playlist=no_playlist,
+                embed_metadata=embed_metadata,
+                subtitles=subtitles,
+                output_template=output_template,
+                cookies_file=cookies_file,
+            )
 
-            if fmt == "mp4":
-                if video_quality.isdigit():
-                    h = video_quality
-                    cmd.extend(
-                        [
-                            "-f",
-                            f"bv*[height<={h}][ext=mp4]+ba[ext=m4a]/b[height<={h}][ext=mp4] / bv*[height<={h}]+ba/b[height<={h}]",
-                        ]
-                    )
-                else:
-                    cmd.extend(
-                        [
-                            "-f",
-                            "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
-                        ]
-                    )
-                cmd.extend(["--merge-output-format", "mp4"])
+            # Perfiles de cliente para sortear bloqueos anti-bot en IPs de servidor (Render)
+            if is_youtube_url(url) and not cookies_file:
+                profiles = [
+                    [
+                        "--extractor-args",
+                        "youtube:player_client=web_embedded,ios,mweb,tv",
+                    ],
+                    [
+                        "--extractor-args",
+                        "youtube:player_client=tv_simply,mweb,web_safari,android_vr",
+                        "--force-ipv4",
+                    ],
+                    [],
+                ]
             else:
-                valid_aq = audio_quality if audio_quality in ("0", "192K", "128K", "96K") else "0"
-                cmd.extend(["-x", "--audio-format", "mp3", "--audio-quality", valid_aq])
+                profiles = [[]]
 
-            if embed_metadata:
-                cmd.extend(["--embed-thumbnail", "--embed-metadata"])
+            last_error = "Error al ejecutar yt-dlp."
+            success = False
 
-            if fmt == "mp4" and subtitles:
-                cmd.extend(["--write-subs", "--embed-subs", "--sub-langs", "es.*,en.*"])
+            for extra_flags in profiles:
+                cmd = base_args + extra_flags + ["--", url]
+                try:
+                    proc = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=600,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    self._send_json(
+                        HTTPStatus.GATEWAY_TIMEOUT,
+                        {"error": "Tiempo de espera agotado al descargar el video."},
+                    )
+                    return
 
-            cmd.extend(["-o", output_template, "--", url])
+                if proc.returncode == 0:
+                    success = True
+                    break
 
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired:
-                self._send_json(
-                    HTTPStatus.GATEWAY_TIMEOUT,
-                    {"error": "Tiempo de espera agotado al descargar el video."},
-                )
-                return
+                err_lines = [
+                    line
+                    for line in (proc.stderr or proc.stdout or "").splitlines()
+                    if "ERROR:" in line
+                ]
+                if err_lines:
+                    last_error = err_lines[-1]
+                elif proc.stderr or proc.stdout:
+                    last_error = (proc.stderr or proc.stdout).strip().splitlines()[-1]
 
-            if proc.returncode != 0:
-                stderr_tail = (proc.stderr or proc.stdout or "Error en yt-dlp").strip().splitlines()[-1]
+            if not success:
                 self._send_json(
                     HTTPStatus.BAD_GATEWAY,
-                    {"error": f"yt-dlp reportó un error: {stderr_tail}"},
+                    {"error": f"yt-dlp reportó un error: {last_error}"},
                 )
                 return
 
             files = [
                 Path(tmpdir) / f
                 for f in os.listdir(tmpdir)
-                if os.path.isfile(os.path.join(tmpdir, f))
+                if os.path.isfile(os.path.join(tmpdir, f)) and f != "cookies.txt"
             ]
             if not files:
                 self._send_json(
@@ -239,7 +303,6 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                 )
                 return
 
-            # Preferir archivo que coincida con la extensión solicitada (.mp4 o .mp3)
             matching = [p for p in files if p.suffix.lower() == f".{fmt}"]
             target_file = matching[0] if matching else max(files, key=lambda p: p.stat().st_size)
 
@@ -276,7 +339,7 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
 
 def main():
     if not shutil.which("yt-dlp"):
-        print("[!] Advertencia: 'yt-dlp' no se encontró en el PATH. Instálalo con: pip install -U yt-dlp")
+        print("[!] Advertencia: 'yt-dlp' no se encontró en el PATH.")
 
     server = ThreadingHTTPServer((HOST, PORT), VerdeDLRequestHandler)
     print("============================================================")
