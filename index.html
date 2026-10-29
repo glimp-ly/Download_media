@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Herramienta web sencilla e intuitiva para descargar videos y audio en MP4 o MP3 usando yt-dlp. Sin registro ni login." />
+  <meta name="theme-color" content="#062016" />
+  <title>VerdeDL — Descargador de Videos con yt-dlp (MP4 &amp; MP3)</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23059669'/><path d='M50 22v38m0 0l-16-16m16 16l16-16M26 74h48' stroke='%23ecfdf5' stroke-width='9' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Fondo decorativo ambiental -->
+  <div class="bg-glow bg-glow-1" aria-hidden="true"></div>
+  <div class="bg-glow bg-glow-2" aria-hidden="true"></div>
+
+  <!-- Barra de navegación superior -->
+  <header class="navbar">
+    <div class="container navbar-content">
+      <a href="#" class="brand" aria-label="VerdeDL Inicio">
+        <span class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v12m0 0l-4-4m4 4l4-4" />
+            <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+          </svg>
+        </span>
+        <div class="brand-text">
+          <span class="brand-title">Verde<span class="accent">DL</span></span>
+          <span class="brand-badge">yt-dlp Web</span>
+        </div>
+      </a>
+
+      <div class="navbar-actions">
+        <!-- Estado del motor yt-dlp para descarga directa -->
+        <button type="button" id="serverStatusBtn" class="server-pill" title="Configurar servidor yt-dlp para descarga directa">
+          <span class="status-dot" id="serverStatusDot"></span>
+          <span id="serverStatusText">Modo GitHub Pages (Comando)</span>
+        </button>
+
+        <!-- Botón de cambio de tema (Verde Bosque Oscuro / Verde Menta Claro) -->
+        <button type="button" id="themeToggleBtn" class="icon-btn" aria-label="Cambiar tema de color" title="Cambiar entre verde oscuro y verde claro">
+          <svg id="themeIconSun" class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5" />
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          </svg>
+          <svg id="themeIconMoon" class="icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container main-content">
+    <!-- Hero / Encabezado Principal -->
+    <section class="hero">
+      <div class="hero-pill">
+        <span class="pulse-dot"></span>
+        Sin login · Sin publicidad · Impulsado por <strong>yt-dlp</strong>
+      </div>
+      <h1>Descarga videos y audio fácilmente</h1>
+      <p class="hero-subtitle">
+        Pega el enlace del video, elige entre <strong>MP4 (Video)</strong> o <strong>MP3 (Audio)</strong> y obtén al instante el comando exacto de <code>yt-dlp</code> o descárgalo directamente.
+      </p>
+    </section>
+
+    <!-- Tarjeta Principal de Descarga y Configuración -->
+    <section class="card main-card" aria-label="Configurador de descarga">
+      <!-- PASO 1: Enlace del video -->
+      <div class="step-block">
+        <div class="step-header">
+          <span class="step-number">1</span>
+          <label for="videoUrlInput" class="step-title">Enlace del video o audio</label>
+          <span id="platformBadge" class="platform-badge hidden">Sitio detectado</span>
+        </div>
+
+        <div class="url-input-group">
+          <div class="url-input-wrapper">
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+            </svg>
+            <input
+              type="url"
+              id="videoUrlInput"
+              class="url-input"
+              placeholder="https://www.youtube.com/watch?v=... (YouTube, TikTok, Vimeo, X, Twitch...)"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="button" id="clearUrlBtn" class="clear-btn hidden" aria-label="Limpiar enlace" title="Limpiar enlace">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <button type="button" id="pasteUrlBtn" class="btn btn-secondary">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+            </svg>
+            <span>Pegar link</span>
+          </button>
+        </div>
+        <p id="urlValidationMsg" class="validation-msg hidden" role="alert"></p>
+
+        <!-- Vista previa automática del video -->
+        <div id="videoPreviewCard" class="video-preview hidden" aria-live="polite">
+          <div class="preview-thumb-wrap">
+            <img id="previewThumbnail" src="" alt="Miniatura del video" class="preview-thumb" loading="lazy" />
+            <span id="previewDuration" class="preview-duration hidden"></span>
+          </div>
+          <div class="preview-info">
+            <span id="previewExtractor" class="preview-tag">Video</span>
+            <h3 id="previewTitle" class="preview-title">Cargando información del video...</h3>
+            <p id="previewAuthor" class="preview-author"></p>
+          </div>
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- PASO 2: Formato (MP4 o MP3) y Opciones -->
+      <div class="step-block">
+        <div class="step-header">
+          <span class="step-number">2</span>
+          <span class="step-title">Formato de descarga</span>
+        </div>
+
+        <!-- Selector grande MP4 vs MP3 -->
+        <div class="format-grid" role="radiogroup" aria-label="Tipo de formato">
+          <button
+            type="button"
+            class="format-card active"
+            data-format="mp4"
+            role="radio"
+            aria-checked="true"
+            id="formatMp4Btn"
+          >
+            <div class="format-card-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="4" width="20" height="16" rx="3" />
+                <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" />
+              </svg>
+            </div>
+            <div class="format-card-body">
+              <div class="format-card-head">
+                <span class="format-name">MP4 · Video</span>
+                <span class="format-tag">Video + Audio</span>
+              </div>
+              <p class="format-desc">Descarga el video completo en formato compatible MP4 con audio integrado.</p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            class="format-card"
+            data-format="mp3"
+            role="radio"
+            aria-checked="false"
+            id="formatMp3Btn"
+          >
+            <div class="format-card-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 18V5l12-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="16" r="3" />
+              </svg>
+            </div>
+            <div class="format-card-body">
+              <div class="format-card-head">
+                <span class="format-name">MP3 · Solo Audio</span>
+                <span class="format-tag">Extracción directa</span>
+              </div>
+              <p class="format-desc">Extrae únicamente la pista de audio convertida a MP3 de alta calidad.</p>
+            </div>
+          </button>
+        </div>
+
+        <!-- Opciones adaptativas según MP4 o MP3 -->
+        <div class="options-row">
+          <!-- Selector de Calidad Video (visible en MP4) -->
+          <div id="videoQualityGroup" class="option-item">
+            <label for="videoQualitySelect" class="option-label">Resolución máxima (MP4)</label>
+            <div class="select-wrapper">
+              <select id="videoQualitySelect" class="custom-select">
+                <option value="best" selected>Mejor calidad disponible (Auto)</option>
+                <option value="2160">4K Ultra HD (2160p)</option>
+                <option value="1440">2K QHD (1440p)</option>
+                <option value="1080">Full HD (1080p)</option>
+                <option value="720">HD (720p)</option>
+                <option value="480">Estándar (480p)</option>
+                <option value="360">Ligero / Datos móviles (360p)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Selector de Calidad Audio (visible en MP3) -->
+          <div id="audioQualityGroup" class="option-item hidden">
+            <label for="audioQualitySelect" class="option-label">Calidad de audio (MP3)</label>
+            <div class="select-wrapper">
+              <select id="audioQualitySelect" class="custom-select">
+                <option value="0" selected>Máxima calidad (320 kbps / VBR 0)</option>
+                <option value="192K">Alta calidad (192 kbps)</option>
+                <option value="128K">Estándar (128 kbps)</option>
+                <option value="96K">Ligero / Voz (96 kbps)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Sistema operativo para el comando / script -->
+          <div class="option-item">
+            <label for="osTargetSelect" class="option-label">Sistema para el comando</label>
+            <div class="select-wrapper">
+              <select id="osTargetSelect" class="custom-select">
+                <option value="unix">Linux / macOS (Bash / Zsh)</option>
+                <option value="windows">Windows (CMD / PowerShell)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Opciones adicionales en chips/toggles sencillos -->
+        <div class="toggles-bar" aria-label="Opciones adicionales de descarga">
+          <label class="toggle-chip">
+            <input type="checkbox" id="optNoPlaylist" checked />
+            <span class="chip-box"></span>
+            <span>Solo este video (ignorar playlist)</span>
+          </label>
+
+          <label class="toggle-chip">
+            <input type="checkbox" id="optEmbedMetadata" />
+            <span class="chip-box"></span>
+            <span>Incrustar miniatura y metadatos</span>
+          </label>
+
+          <label class="toggle-chip" id="subtitlesChipWrap">
+            <input type="checkbox" id="optSubtitles" />
+            <span class="chip-box"></span>
+            <span>Descargar subtítulos (ES/EN)</span>
+          </label>
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- PASO 3: Comando yt-dlp generado y Descarga -->
+      <div class="step-block">
+        <div class="step-header">
+          <span class="step-number">3</span>
+          <span class="step-title">Comando <code>yt-dlp</code> armado y Descarga</span>
+        </div>
+
+        <!-- Caja de comando estilo terminal -->
+        <div class="terminal-box">
+          <div class="terminal-header">
+            <div class="terminal-dots" aria-hidden="true">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+            </div>
+            <span class="terminal-title" id="terminalModeLabel">Terminal · Comando yt-dlp (MP4)</span>
+            <div class="terminal-actions">
+              <button type="button" id="copyCmdBtn" class="terminal-btn" title="Copiar comando al portapapeles">
+                <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                </svg>
+                <span id="copyCmdText">Copiar comando</span>
+              </button>
+              <button type="button" id="downloadScriptBtn" class="terminal-btn" title="Descargar script ejecutable (.sh / .bat)">
+                <svg class="btn-icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="12" y1="18" x2="12" y2="12" />
+                  <polyline points="9 15 12 18 15 15" />
+                </svg>
+                <span id="scriptExtLabel">Script .sh</span>
+              </button>
+            </div>
+          </div>
+
+          <pre class="terminal-code-wrap"><code id="ytdlpCommandOutput" class="terminal-code">yt-dlp -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b" --merge-output-format mp4 --no-playlist -o "%(title)s.%(ext)s" "https://www.youtube.com/watch?v=dQw4w9WgXcQ"</code></pre>
+
+          <!-- Desglose interactivo de qué hace cada parte del comando -->
+          <div class="cmd-breakdown" id="cmdBreakdown"></div>
+        </div>
+
+        <!-- Botones de acción principales -->
+        <div class="action-buttons">
+          <button type="button" id="directDownloadBtn" class="btn btn-primary btn-lg">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3">
+              <path d="M12 3v12m0 0l-4-4m4 4l4-4" />
+              <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+            </svg>
+            <span id="directDownloadBtnText">Descargar MP4 ahora</span>
+          </button>
+
+          <button type="button" id="copyPrimaryBtn" class="btn btn-outline btn-lg">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+            <span>Copiar comando yt-dlp</span>
+          </button>
+        </div>
+
+        <!-- Barra de estado / progreso de descarga -->
+        <div id="downloadStatusPanel" class="status-panel hidden" role="status" aria-live="polite">
+          <div class="status-panel-header">
+            <span class="spinner" id="downloadSpinner"></span>
+            <span id="downloadStatusTitle" class="status-title">Procesando con yt-dlp...</span>
+          </div>
+          <p id="downloadStatusDetail" class="status-detail"></p>
+          <div class="progress-bar-track" id="progressBarTrack">
+            <div class="progress-bar-fill" id="progressBarFill"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sección de Historial Reciente (LocalStorage, sin login) -->
+    <section id="historySection" class="card secondary-card hidden" aria-label="Historial reciente">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Comandos y descargas recientes</h2>
+          <p class="section-subtitle">Guardado solo en tu navegador (sin cuentas ni servidores externos).</p>
+        </div>
+        <button type="button" id="clearHistoryBtn" class="btn btn-ghost btn-sm">Limpiar historial</button>
+      </div>
+      <div id="historyList" class="history-list"></div>
+    </section>
+
+    <!-- Guía rápida de uso -->
+    <section class="info-grid" aria-label="Información de uso">
+      <article class="card info-card">
+        <div class="info-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+        </div>
+        <h3>1. Por Comando o Script</h3>
+        <p>
+          Funciona 100% desde <strong>GitHub Pages</strong>. Pega tu enlace, elige <strong>MP4</strong> o <strong>MP3</strong> y copia el comando optimizado de <code>yt-dlp</code> o descarga el script ejecutable.
+        </p>
+      </article>
+
+      <article class="card info-card">
+        <div class="info-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 3v12m0 0l-4-4m4 4l4-4" />
+            <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+          </svg>
+        </div>
+        <h3>2. Descarga Directa en Web</h3>
+        <p>
+          Si ejecutas el servidor incluido (<code>python3 server.py</code>), el botón <strong>Descargar ahora</strong> procesa el video con <code>yt-dlp</code> y guarda el archivo MP4 o MP3 directo en tu equipo.
+        </p>
+      </article>
+
+      <article class="card info-card">
+        <div class="info-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+        </div>
+        <h3>3. Sin Login &amp; +1000 Sitios</h3>
+        <p>
+          Compatible con YouTube, TikTok, Vimeo, Twitch, X (Twitter), SoundCloud, Instagram y más de mil plataformas soportadas por <code>yt-dlp</code>.
+        </p>
+      </article>
+    </section>
+  </main>
+
+  <!-- Modal para configurar o ver estado del servidor yt-dlp -->
+  <div id="serverModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modalTitle">Conexión con motor yt-dlp</h2>
+        <button type="button" id="closeModalBtn" class="icon-btn" aria-label="Cerrar ventana">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <p class="modal-text">
+          Dado que <strong>GitHub Pages</strong> aloja sitios estáticos, el generador de comandos funciona siempre sin servidores. Para habilitar también la <strong>descarga directa del archivo en el navegador</strong>, conecta el backend local o remoto con <code>yt-dlp</code>:
+        </p>
+
+        <div class="modal-field">
+          <label for="backendUrlInput" class="option-label">URL del servidor yt-dlp</label>
+          <div class="url-input-group">
+            <input
+              type="url"
+              id="backendUrlInput"
+              class="url-input"
+              placeholder="http://localhost:8000"
+               value="http://localhost:8000"
+            />
+            <button type="button" id="saveBackendBtn" class="btn btn-primary">Probar y Guardar</button>
+          </div>
+          <p id="backendTestResult" class="modal-hint"></p>
+        </div>
+
+        <div class="modal-instructions">
+          <h3>¿Cómo iniciar el servidor local incluido?</h3>
+          <p>En la carpeta de este proyecto ejecuta:</p>
+          <pre class="mini-code"><code>python3 server.py</code></pre>
+          <p class="modal-subtext">
+            Esto activa el motor <code>yt-dlp</code> en <code>http://localhost:8000</code> con permiso CORS para funcionar incluso desde tu página publicada en GitHub Pages.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notificación Toast flotante -->
+  <div id="toastNotification" class="toast hidden" role="status" aria-live="polite">
+    <span id="toastMessage">Comando copiado al portapapeles</span>
+  </div>
+
+  <footer class="footer">
+    <div class="container footer-content">
+      <p><strong>VerdeDL</strong> · Interfaz web para <code>yt-dlp</code> · Diseñada para GitHub Pages</p>
+      <p class="footer-note">Sin cuentas · Sin rastreo · Código abierto</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

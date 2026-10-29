@@ -1,0 +1,55 @@
+# ==========================================================================
+# VerdeDL — .gitignore
+# ==========================================================================
+
+# Archivos descargados o temporales de yt-dlp (evitar subir videos/audios al repo)
+*.mp4
+*.mp3
+*.m4a
+*.webm
+*.mkv
+*.flv
+*.avi
+*.wav
+*.ogg
+*.opus
+*.part
+*.ytdl
+*.temp
+*.vtt
+*.srt
+downloads/
+verdedl_*/
+
+# Caché y entornos virtuales de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Variables de entorno y logs
+.env
+.env.*
+*.log
+
+# Archivos del sistema operativo
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Editores e IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
