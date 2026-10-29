@@ -5,6 +5,11 @@
 (function () {
   "use strict";
 
+  // Si usas GitHub Pages para el frontend y Render para el backend, pega aquí tu URL de Render
+  // (por ejemplo: "https://verdedl-ytdlp.onrender.com"). Si abres directamente la URL de Render,
+  // se detecta sola automáticamente sin necesidad de cambiar nada.
+  const DEFAULT_RENDER_URL = "https://verdedl-ytdlp.onrender.com";
+
   // Estado de la aplicación
   const state = {
     url: "",
@@ -102,6 +107,13 @@
     updateUI();
     renderHistory();
     checkBackendStatus();
+
+    // Ping preventivo cada 10 minutos para evitar que Render entre en suspensión por inactividad
+    setInterval(() => {
+      if (state.backendUrl) {
+        checkBackendStatus(true);
+      }
+    }, 10 * 60 * 1000);
   }
 
   function detectDefaultOS() {
@@ -111,13 +123,16 @@
   }
 
   function getDefaultBackendUrl() {
+    const host = window.location.hostname.toLowerCase();
+    // Si la web se abre directamente desde Render, localhost o servidor propio, usar el mismo origen
     if (
       window.location.protocol.startsWith("http") &&
-      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+      !host.endsWith(".github.io")
     ) {
       return window.location.origin;
     }
-    return "http://localhost:8000";
+    // Si se abre desde GitHub Pages, usar la URL de Render configurada
+    return DEFAULT_RENDER_URL || "http://localhost:8000";
   }
 
   // ==========================================================================
@@ -637,12 +652,19 @@
   }
 
   // ==========================================================================
-  // Conexión con Backend yt-dlp y Descarga Directa en el Navegador
+  // Conexión con Backend yt-dlp (Render / Local) y Descarga Directa
   // ==========================================================================
-  async function checkBackendStatus() {
+  async function checkBackendStatus(silent = false) {
+    const isRemoteRender = state.backendUrl.includes("onrender.com");
+    if (!silent && isRemoteRender && !state.backendOnline) {
+      els.serverStatusText.textContent = "Conectando / Despertando Render...";
+    }
+
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2500);
+      // 45s de margen si es Render (por si está despertando del modo reposo), 4s si es local
+      const timeoutMs = isRemoteRender ? 45000 : 4000;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(`${state.backendUrl}/api/health`, {
         signal: controller.signal,
       });

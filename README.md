@@ -1,42 +1,34 @@
 # VerdeDL — Descargador Web con `yt-dlp` (MP4 & MP3)
 
-Aplicación web responsiva con paleta de colores verdes, sin necesidad de login, diseñada para funcionar tanto publicada estáticamente en **GitHub Pages** como conectada a un motor local/remoto de **`yt-dlp`** para descargas directas.
+Aplicación web responsiva con paleta de colores verdes, sin necesidad de login, lista para publicarse tanto en **GitHub Pages** como en **Render.com** (con **Docker + Python + `yt-dlp` + `ffmpeg`** incluidos para descarga directa desde el navegador para cualquier visitante).
 
 ## Características principales
 
 - **Sin registro ni login:** Acceso inmediato a todas las funciones.
-- **Selector intuitivo MP4 (Video) y MP3 (Audio):**
-  - **MP4:** Selección de resolución máxima (`Mejor calidad`, `4K`, `1440p`, `1080p`, `720p`, `480p`, `360p`), subtítulos e incrustación de miniatura/metadatos.
-  - **MP3:** Extracción directa de audio con selección de calidad (`320kbps / VBR 0`, `192K`, `128K`, `96K`).
+- **Descarga directa en el navegador (MP4 y MP3):** Cualquier persona que entre a la web puede pegar el link y descargar el archivo `.mp4` o `.mp3` directamente a su celular o PC gracias al backend integrado para **Render**.
 - **Armado automático del comando `yt-dlp`:**
-  - Actualización en tiempo real del comando exacto según el enlace y las opciones elegidas.
-  - Explicación visual de cada parámetro del comando.
-  - Botón para copiar con un clic y descarga de script ejecutable (`.sh` para Linux/macOS o `.bat` para Windows).
-- **Vista previa del video:** Muestra título, autor y miniatura automáticamente (compatible con GitHub Pages vía oEmbed y con metadatos completos vía `yt-dlp`).
-- **Descarga directa desde el navegador:** Incluye [`server.py`](./server.py) con `yt-dlp` y soporte CORS para descargar el archivo `.mp4` o `.mp3` directamente a tu dispositivo.
-- **Diseño Responsive y Paleta Verde:** Adaptado a móviles, tablets y escritorio, con cambio entre modo **Verde Bosque Oscuro** y **Verde Menta Claro**.
+  - Actualización en tiempo real del comando según el enlace y las opciones elegidas (`MP4` con resolución hasta 4K/1080p/720p o `MP3` hasta 320kbps).
+  - Explicación visual de cada parámetro, copiado en 1 clic y descarga de script ejecutable (`.sh` / `.bat`).
+- **Anti-suspensión para Render:** Incluye ping automático en [`app.js`](./app.js) y endpoint `/api/health` listo para mantener el servicio despierto 24/7 con [cron-job.org](https://cron-job.org) o UptimeRobot.
 
 ---
 
-## Cómo publicar en GitHub Pages
+## Cómo activarlo en Render al conectar tu GitHub (Gratis)
 
-1. Sube este repositorio a GitHub.
-2. Ve a **Settings → Pages** en tu repositorio.
-3. En **Build and deployment**, selecciona **Deploy from a branch** (rama `main` / carpeta `/ (root)`) o **GitHub Actions** (ya incluye el workflow en `.github/workflows/deploy-pages.yml`).
-4. ¡Listo! Tu web estará publicada en `https://<tu-usuario>.github.io/<tu-repo>/`.
+El repositorio ya incluye [`Dockerfile`](./Dockerfile) y [`render.yaml`](./render.yaml) con `python3`, `yt-dlp` y `ffmpeg` preconfigurados:
 
----
+1. Sube este repositorio a tu cuenta de **GitHub**.
+2. Entra a [Render.com](https://render.com/) → **New +** → **Web Service** (o **Blueprint**).
+3. Conecta tu repositorio de GitHub:
+   - Render detectará automáticamente el **Runtime: Docker** y el plan **Free**.
+   - Haz clic en **Create Web Service**.
+4. Cuando termine de desplegar, Render te dará una URL como `https://verdedl-ytdlp.onrender.com`:
+   - Si compartes directamente esa URL de Render, **ya incluye tanto la página web completa como el motor de descargas `yt-dlp`**.
+   - Si además publicas en **GitHub Pages**, asegúrate de que la constante `DEFAULT_RENDER_URL` en la línea 11 de [`app.js`](./app.js) tenga tu URL de Render (por defecto ya viene como `"https://verdedl-ytdlp.onrender.com"`).
 
-## Cómo usar la descarga directa con `yt-dlp`
-
-Para descargar el archivo `.mp4` o `.mp3` directamente desde el navegador (incluso entrando desde tu URL de GitHub Pages):
-
-1. Asegúrate de tener `yt-dlp` y `ffmpeg` instalados:
-   ```bash
-   pip install -U yt-dlp
-   ```
-2. Inicia el servidor incluido:
-   ```bash
-   python3 server.py
-   ```
-3. Abre `http://localhost:8000` (o usa tu web de GitHub Pages; se conectará automáticamente a `http://localhost:8000`).
+### Evitar que Render se duerma tras 15 minutos de inactividad
+Crea una tarea gratuita en [cron-job.org](https://cron-job.org) apuntando a:
+```text
+https://TU-SERVICIO.onrender.com/api/health
+```
+Configúrala cada **10 minutos**. Así el contenedor de Render permanecerá activo las 24 horas dentro de las 750 horas gratuitas mensuales.
