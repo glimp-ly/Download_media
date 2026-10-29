@@ -3,7 +3,8 @@
 VerdeDL — Servidor Backend yt-dlp para Descarga Directa (MP4 / MP3)
 -------------------------------------------------------------------
 Sirve la web estática y expone los endpoints /api/health, /api/info y /api/download
-con soporte multi-cliente anti-bot para YouTube en servidores de nube (Render).
+con soporte de PO Token (bgutil-pot), NodeJS runtime y TLS Impersonation (curl_cffi)
+para evitar bloqueos anti-bot de YouTube en servidores cloud como Render.
 """
 
 import json
@@ -37,6 +38,24 @@ YTDLP_VERSION = _detect_ytdlp_version()
 
 def get_ytdlp_version() -> str:
     return YTDLP_VERSION
+
+
+def start_pot_provider_daemon():
+    """Inicia el servidor local bgutil-pot en el puerto 4416 si está instalado."""
+    pot_bin = shutil.which("bgutil-pot")
+    if not pot_bin:
+        return None
+    try:
+        proc = subprocess.Popen(
+            [pot_bin, "server", "--host", "127.0.0.1", "--port", "4416"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print("  Proveedor PO Token (bgutil-pot) activo en 127.0.0.1:4416")
+        return proc
+    except Exception as exc:
+        print(f"  [!] No se pudo iniciar bgutil-pot: {exc}")
+        return None
 
 
 def validate_url(url: str) -> bool:
@@ -105,18 +124,23 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
         try:
             cmd = [
                 "yt-dlp",
+                "--js-runtimes",
+                "node",
+                "--impersonate",
+                "chrome",
                 "--dump-single-json",
                 "--no-playlist",
                 "--no-warnings",
                 "--extractor-args",
-                "youtube:player_client=web_embedded,ios,mweb,tv",
+                "youtube:player_client=android_vr,mweb",
+                "--",
                 url,
             ]
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=20,
+                timeout=25,
                 check=False,
             )
             if proc.returncode != 0 or not proc.stdout:
@@ -154,6 +178,8 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
     ) -> list[str]:
         args = [
             "yt-dlp",
+            "--js-runtimes",
+            "node",
             "--no-playlist" if no_playlist else "--yes-playlist",
             "--no-part",
             "--geo-bypass",
@@ -233,22 +259,28 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                 cookies_file=cookies_file,
             )
 
-            # Perfiles de cliente para sortear bloqueos anti-bot en IPs de servidor (Render)
+            # Perfiles limpios e independientes con PO Token (bgutil) + TLS Impersonate
             if is_youtube_url(url) and not cookies_file:
                 profiles = [
                     [
+                        "--impersonate",
+                        "chrome",
                         "--extractor-args",
-                        "youtube:player_client=web_embedded,ios,mweb,tv",
+                        "youtube:player_client=mweb,android_vr",
                     ],
                     [
+                        "--impersonate",
+                        "chrome",
                         "--extractor-args",
-                        "youtube:player_client=tv_simply,mweb,web_safari,android_vr",
-                        "--force-ipv4",
+                        "youtube:player_client=tv_simply,android",
                     ],
-                    [],
+                    [
+                        "--impersonate",
+                        "chrome",
+                    ],
                 ]
             else:
-                profiles = [[]]
+                profiles = [["--impersonate", "chrome"], []]
 
             last_error = "Error al ejecutar yt-dlp."
             success = False
@@ -341,8 +373,9 @@ def main():
     if not shutil.which("yt-dlp"):
         print("[!] Advertencia: 'yt-dlp' no se encontró en el PATH.")
 
-    server = ThreadingHTTPServer((HOST, PORT), VerdeDLRequestHandler)
     print("============================================================")
+    pot_proc = start_pot_provider_daemon()
+    server = ThreadingHTTPServer((HOST, PORT), VerdeDLRequestHandler)
     print(f"  VerdeDL Server activo en: http://localhost:{PORT}")
     print(f"  Motor yt-dlp versión:     {get_ytdlp_version()}")
     print("  Presiona Ctrl+C para detener el servidor.")
@@ -352,6 +385,8 @@ def main():
     except KeyboardInterrupt:
         print("\nDeteniendo servidor...")
         server.server_close()
+        if pot_proc:
+            pot_proc.terminate()
 
 
 if __name__ == "__main__":

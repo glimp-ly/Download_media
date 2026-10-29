@@ -1,1 +1,2 @@
 yt-dlp[default,curl-cffi]>=2025.1.1
+bgutil-ytdlp-pot-provider>=1.0.0
