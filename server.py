@@ -24,6 +24,7 @@ from pathlib import Path
 PORT = int(os.environ.get("PORT", "8000"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 WEB_ROOT = Path(__file__).resolve().parent
+PLUGIN_DIR = Path("/etc/yt-dlp/plugins")
 
 SECRET_COOKIE_PATHS = [
     Path("/etc/secrets/cookies.txt"),
@@ -61,7 +62,6 @@ def resolve_cookies_content(payload_cookies: str) -> str:
     """Obtiene el contenido de cookies.txt desde el payload, variable de entorno o Secret File de Render."""
     raw = (payload_cookies or os.environ.get("YTDLP_COOKIES") or "").strip()
     if raw:
-        # Si fue codificado en Base64 (sin espacios ni encabezados Netscape), decodificarlo
         if "\n" not in raw and "\t" not in raw and not raw.startswith("#"):
             try:
                 decoded = base64.b64decode(raw).decode("utf-8", errors="ignore")
@@ -166,6 +166,7 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
             cookies_text = resolve_cookies_content("")
             cmd = [
                 "yt-dlp",
+                "--no-js-runtimes",
                 "--js-runtimes",
                 "node",
                 "--impersonate",
@@ -174,11 +175,15 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                 "--no-playlist",
                 "--no-warnings",
             ]
+            if PLUGIN_DIR.is_dir():
+                cmd.extend(["--plugin-dirs", str(PLUGIN_DIR)])
+
             if cookies_text:
                 cfile = os.path.join(tmpdir, "cookies.txt")
                 with open(cfile, "w", encoding="utf-8") as cf:
                     cf.write(cookies_text + "\n")
                 cmd.extend(["--cookies", cfile])
+                cmd.extend(["--extractor-args", "youtube:player_client=mweb,web"])
             else:
                 cmd.extend(["--extractor-args", "youtube:player_client=mweb,android_vr"])
 
@@ -222,10 +227,10 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
         embed_metadata: bool,
         subtitles: bool,
         output_template: str,
-        cookies_file: str | None,
     ) -> list[str]:
         args = [
             "yt-dlp",
+            "--no-js-runtimes",
             "--js-runtimes",
             "node",
             "--no-playlist" if no_playlist else "--yes-playlist",
@@ -233,8 +238,8 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
             "--geo-bypass",
         ]
 
-        if cookies_file:
-            args.extend(["--cookies", cookies_file])
+        if PLUGIN_DIR.is_dir():
+            args.extend(["--plugin-dirs", str(PLUGIN_DIR)])
 
         if fmt == "mp4":
             if video_quality.isdigit():
@@ -242,14 +247,14 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                 args.extend(
                     [
                         "-f",
-                        f"bv*[height<={h}][ext=mp4]+ba[ext=m4a]/b[height<={h}][ext=mp4] / bv*[height<={h}]+ba/b[height<={h}] / b",
+                        f"bv*[height<={h}][ext=mp4]+ba[ext=m4a]/b[height<={h}][ext=mp4]/bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b",
                     ]
                 )
             else:
                 args.extend(
                     [
                         "-f",
-                        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b / b",
+                        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
                     ]
                 )
             args.extend(["--merge-output-format", "mp4"])
@@ -304,39 +309,36 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                 embed_metadata=embed_metadata,
                 subtitles=subtitles,
                 output_template=output_template,
-                cookies_file=cookies_file,
             )
 
-            if is_youtube_url(url) and not cookies_file:
-                profiles = [
+            if is_youtube_url(url):
+                profiles = []
+                if cookies_file:
+                    # 1. Usar cliente mweb primero con cookies (evita el bloqueo SABR del cliente web en cuentas logueadas)
+                    profiles.append(
+                        [
+                            "--cookies",
+                            cookies_file,
+                            "--impersonate",
+                            "chrome",
+                            "--extractor-args",
+                            "youtube:player_client=mweb,web;youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
+                        ]
+                    )
+                # 2. Respaldo con android_vr y mweb + PO Token (sin cookies, ya que android_vr no tiene restricción SABR de cuenta)
+                profiles.append(
                     [
                         "--impersonate",
                         "chrome",
                         "--extractor-args",
-                        "youtube:player_client=mweb,android_vr;youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
-                    ],
-                    [
-                        "--impersonate",
-                        "chrome",
-                        "--extractor-args",
-                        "youtube:player_client=tv_simply,android;youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
-                    ],
-                    [
-                        "--impersonate",
-                        "chrome",
-                    ],
-                ]
+                        "youtube:player_client=android_vr,mweb,tv_simply;youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
+                    ]
+                )
             else:
-                # Cuando hay cookies configuradas, NO usar android_vr (ya que android_vr ignora cookies)
-                profiles = [
-                    [
-                        "--impersonate",
-                        "chrome",
-                        "--extractor-args",
-                        "youtube:player_client=web,mweb,tv_simply;youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
-                    ],
-                    ["--impersonate", "chrome"],
-                ]
+                if cookies_file:
+                    profiles = [["--cookies", cookies_file, "--impersonate", "chrome"], ["--cookies", cookies_file]]
+                else:
+                    profiles = [["--impersonate", "chrome"], []]
 
             last_error = "Error al ejecutar yt-dlp."
             success = False
