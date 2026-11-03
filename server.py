@@ -2,11 +2,14 @@
 """
 VerdeDL — Servidor Backend yt-dlp para Descarga Directa (MP4 / MP3)
 -------------------------------------------------------------------
-Sirve la web estática y expone los endpoints /api/health, /api/info y /api/download
-con soporte de PO Token (bgutil-pot), NodeJS runtime y TLS Impersonation (curl_cffi)
-para evitar bloqueos anti-bot de YouTube en servidores cloud como Render.
+Soporta:
+1. Secret Files de Render (/etc/secrets/cookies.txt o /app/cookies.txt)
+2. Variable de entorno YTDLP_COOKIES (texto Netscape o Base64)
+3. Cookies enviadas desde la web (cookiesText)
+4. Proveedor local de PO Tokens (bgutil-pot) + NodeJS + Chrome TLS Impersonation
 """
 
+import base64
 import json
 import mimetypes
 import os
@@ -21,6 +24,11 @@ from pathlib import Path
 PORT = int(os.environ.get("PORT", "8000"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 WEB_ROOT = Path(__file__).resolve().parent
+
+SECRET_COOKIE_PATHS = [
+    Path("/etc/secrets/cookies.txt"),
+    WEB_ROOT / "cookies.txt",
+]
 
 
 def _detect_ytdlp_version() -> str:
@@ -38,6 +46,38 @@ YTDLP_VERSION = _detect_ytdlp_version()
 
 def get_ytdlp_version() -> str:
     return YTDLP_VERSION
+
+
+def has_server_cookies() -> bool:
+    if os.environ.get("YTDLP_COOKIES", "").strip():
+        return True
+    for p in SECRET_COOKIE_PATHS:
+        if p.is_file() and p.stat().st_size > 0:
+            return True
+    return False
+
+
+def resolve_cookies_content(payload_cookies: str) -> str:
+    """Obtiene el contenido de cookies.txt desde el payload, variable de entorno o Secret File de Render."""
+    raw = (payload_cookies or os.environ.get("YTDLP_COOKIES") or "").strip()
+    if raw:
+        # Si fue codificado en Base64 (sin espacios ni encabezados Netscape), decodificarlo
+        if "\n" not in raw and "\t" not in raw and not raw.startswith("#"):
+            try:
+                decoded = base64.b64decode(raw).decode("utf-8", errors="ignore")
+                if "\t" in decoded or "youtube.com" in decoded:
+                    return decoded.strip()
+            except Exception:
+                pass
+        return raw
+
+    for p in SECRET_COOKIE_PATHS:
+        if p.is_file() and p.stat().st_size > 0:
+            try:
+                return p.read_text(encoding="utf-8", errors="ignore").strip()
+            except Exception:
+                pass
+    return ""
 
 
 def start_pot_provider_daemon():
@@ -97,6 +137,7 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                     "status": "ok",
                     "engine": "yt-dlp",
                     "version": get_ytdlp_version(),
+                    "cookies_configured": has_server_cookies(),
                 },
             )
             return
@@ -121,7 +162,8 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Ruta no encontrada."})
 
     def _handle_video_info(self, url: str):
-        try:
+        with tempfile.TemporaryDirectory(prefix="verdedl_info_") as tmpdir:
+            cookies_text = resolve_cookies_content("")
             cmd = [
                 "yt-dlp",
                 "--js-runtimes",
@@ -131,39 +173,45 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                 "--dump-single-json",
                 "--no-playlist",
                 "--no-warnings",
-                "--extractor-args",
-                "youtube:player_client=android_vr,mweb",
-                "--",
-                url,
             ]
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=25,
-                check=False,
-            )
-            if proc.returncode != 0 or not proc.stdout:
-                self._send_json(
-                    HTTPStatus.BAD_GATEWAY,
-                    {"error": "No se pudo obtener información del enlace."},
-                )
-                return
+            if cookies_text:
+                cfile = os.path.join(tmpdir, "cookies.txt")
+                with open(cfile, "w", encoding="utf-8") as cf:
+                    cf.write(cookies_text + "\n")
+                cmd.extend(["--cookies", cfile])
+            else:
+                cmd.extend(["--extractor-args", "youtube:player_client=mweb,android_vr"])
 
-            info = json.loads(proc.stdout)
-            self._send_json(
-                HTTPStatus.OK,
-                {
-                    "title": info.get("title") or "Video",
-                    "uploader": info.get("uploader") or info.get("channel") or "",
-                    "thumbnail": info.get("thumbnail") or "",
-                    "duration": info.get("duration") or 0,
-                    "duration_string": info.get("duration_string") or "",
-                    "extractor_key": info.get("extractor_key") or "Video",
-                },
-            )
-        except Exception as exc:
-            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+            cmd.extend(["--", url])
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=25,
+                    check=False,
+                )
+                if proc.returncode != 0 or not proc.stdout:
+                    self._send_json(
+                        HTTPStatus.BAD_GATEWAY,
+                        {"error": "No se pudo obtener información del enlace."},
+                    )
+                    return
+
+                info = json.loads(proc.stdout)
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "title": info.get("title") or "Video",
+                        "uploader": info.get("uploader") or info.get("channel") or "",
+                        "thumbnail": info.get("thumbnail") or "",
+                        "duration": info.get("duration") or 0,
+                        "duration_string": info.get("duration_string") or "",
+                        "extractor_key": info.get("extractor_key") or "Video",
+                    },
+                )
+            except Exception as exc:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
     def _build_base_ytdlp_args(
         self,
@@ -238,7 +286,7 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
         no_playlist = bool(payload.get("noPlaylist", True))
         embed_metadata = bool(payload.get("embedMetadata", False))
         subtitles = bool(payload.get("subtitles", False))
-        cookies_text = str(payload.get("cookiesText") or os.environ.get("YTDLP_COOKIES") or "").strip()
+        cookies_text = resolve_cookies_content(str(payload.get("cookiesText") or ""))
 
         with tempfile.TemporaryDirectory(prefix="verdedl_") as tmpdir:
             cookies_file = None
@@ -259,20 +307,19 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                 cookies_file=cookies_file,
             )
 
-            # Perfiles limpios e independientes con PO Token (bgutil) + TLS Impersonate
             if is_youtube_url(url) and not cookies_file:
                 profiles = [
                     [
                         "--impersonate",
                         "chrome",
                         "--extractor-args",
-                        "youtube:player_client=mweb,android_vr",
+                        "youtube:player_client=mweb,android_vr;youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
                     ],
                     [
                         "--impersonate",
                         "chrome",
                         "--extractor-args",
-                        "youtube:player_client=tv_simply,android",
+                        "youtube:player_client=tv_simply,android;youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
                     ],
                     [
                         "--impersonate",
@@ -280,7 +327,16 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                     ],
                 ]
             else:
-                profiles = [["--impersonate", "chrome"], []]
+                # Cuando hay cookies configuradas, NO usar android_vr (ya que android_vr ignora cookies)
+                profiles = [
+                    [
+                        "--impersonate",
+                        "chrome",
+                        "--extractor-args",
+                        "youtube:player_client=web,mweb,tv_simply;youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
+                    ],
+                    ["--impersonate", "chrome"],
+                ]
 
             last_error = "Error al ejecutar yt-dlp."
             success = False
@@ -378,6 +434,7 @@ def main():
     server = ThreadingHTTPServer((HOST, PORT), VerdeDLRequestHandler)
     print(f"  VerdeDL Server activo en: http://localhost:{PORT}")
     print(f"  Motor yt-dlp versión:     {get_ytdlp_version()}")
+    print(f"  Cookies en servidor:      {'SÍ' if has_server_cookies() else 'NO'}")
     print("  Presiona Ctrl+C para detener el servidor.")
     print("============================================================")
     try:

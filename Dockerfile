@@ -9,17 +9,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Instalar ffmpeg y nodejs (necesario para desafíos JS de YouTube)
+# Instalar ffmpeg, nodejs y unzip
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg nodejs ca-certificates curl && \
+    apt-get install -y --no-install-recommends ffmpeg nodejs ca-certificates curl unzip && \
     rm -rf /var/lib/apt/lists/*
 
-# Instalar el generador nativo de PO Tokens (BotGuard) en Rust para evitar bloqueos en IPs cloud
+# Instalar el binario bgutil-pot y su plugin correspondiente para yt-dlp
 RUN curl -fsSL https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/bgutil-pot-linux-x86_64 \
     -o /usr/local/bin/bgutil-pot && \
-    chmod +x /usr/local/bin/bgutil-pot
+    chmod +x /usr/local/bin/bgutil-pot && \
+    mkdir -p /root/yt-dlp-plugins/bgutil-ytdlp-pot-provider && \
+    curl -fsSL https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/bgutil-ytdlp-pot-provider-rs.zip \
+    -o /tmp/plugin.zip && \
+    unzip -q /tmp/plugin.zip -d /root/yt-dlp-plugins/bgutil-ytdlp-pot-provider && \
+    rm -f /tmp/plugin.zip
 
-# Instalar yt-dlp (con yt-dlp-ejs y curl-cffi) y el plugin bgutil-ytdlp-pot-provider
+# Instalar yt-dlp con yt-dlp-ejs y curl-cffi
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --upgrade -r requirements.txt
