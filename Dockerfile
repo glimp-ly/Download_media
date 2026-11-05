@@ -1,5 +1,6 @@
 # ==========================================================================
-# VerdeDL — Dockerfile para Render (Python + yt-dlp + ffmpeg + Node + BgUtil POT)
+# VerdeDL — Dockerfile para Render
+# Incluye: Python + yt-dlp + ffmpeg + NodeJS + Cloudflare WARP (wireproxy) + BgUtil POT
 # ==========================================================================
 FROM python:3.12-slim
 
@@ -13,6 +14,16 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg nodejs ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
+
+# Instalar wgcf y wireproxy (Túnel Cloudflare WARP SOCKS5 en espacio de usuario sin root/TUN)
+RUN curl -fsSL https://github.com/ViRb3/wgcf/releases/download/v2.2.22/wgcf_2.2.22_linux_amd64 \
+    -o /usr/local/bin/wgcf && \
+    chmod +x /usr/local/bin/wgcf && \
+    curl -fsSL https://github.com/windtf/wireproxy/releases/download/v1.1.3/wireproxy_linux_amd64.tar.gz \
+    -o /tmp/wireproxy.tar.gz && \
+    tar -xzf /tmp/wireproxy.tar.gz -C /usr/local/bin wireproxy && \
+    chmod +x /usr/local/bin/wireproxy && \
+    rm -f /tmp/wireproxy.tar.gz
 
 # Instalar el binario bgutil-pot y su plugin oficial para yt-dlp en /etc/yt-dlp/plugins/bgutil
 RUN curl -fsSL https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/bgutil-pot-linux-x86_64 \

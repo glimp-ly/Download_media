@@ -2,11 +2,12 @@
 """
 VerdeDL — Servidor Backend yt-dlp para Descarga Directa (MP4 / MP3)
 -------------------------------------------------------------------
-Soporta:
-1. Secret Files de Render (/etc/secrets/cookies.txt o /app/cookies.txt)
-2. Variable de entorno YTDLP_COOKIES (texto Netscape o Base64)
-3. Cookies enviadas desde la web (cookiesText)
-4. Proveedor local de PO Tokens (bgutil-pot en 127.0.0.1:4416) + NodeJS + Chrome TLS Impersonation
+Características principales:
+1. Túnel automático Cloudflare WARP en espacio de usuario (wgcf + wireproxy en 127.0.0.1:1080)
+   para salir a YouTube con IP limpia de WARP en lugar de la IP bloqueada de AWS/Render,
+   permitiendo descargar en 1080p MP4 y MP3 sin necesidad de cookies.
+2. Proveedor local de PO Tokens (bgutil-pot en 127.0.0.1:4416) + NodeJS JS Challenge Solver.
+3. Soporte opcional de cookies (solo como respaldo si el video tiene restricción de edad).
 """
 
 import base64
@@ -14,9 +15,11 @@ import json
 import mimetypes
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.parse
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -26,6 +29,9 @@ PORT = int(os.environ.get("PORT", "8000"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 WEB_ROOT = Path(__file__).resolve().parent
 PLUGIN_DIR = Path("/etc/yt-dlp/plugins")
+WARP_DIR = Path("/tmp/verdedl_warp")
+WARP_PROXY_PORT = 11080
+WARP_PROXY_URL = f"socks5://127.0.0.1:{WARP_PROXY_PORT}"
 PERSISTENT_COOKIE_FILE = Path("/tmp/verdedl_session_cookies.txt")
 COOKIE_LOCK = threading.Lock()
 
@@ -52,77 +58,64 @@ def get_ytdlp_version() -> str:
     return YTDLP_VERSION
 
 
-def has_server_cookies() -> bool:
-    if PERSISTENT_COOKIE_FILE.is_file() and PERSISTENT_COOKIE_FILE.stat().st_size > 0:
-        return True
-    if os.environ.get("YTDLP_COOKIES", "").strip():
-        return True
-    for p in SECRET_COOKIE_PATHS:
-        if p.is_file() and p.stat().st_size > 0:
+def is_port_open(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
             return True
-    return False
+    except OSError:
+        return False
 
 
-def _decode_raw_cookies(raw: str) -> str:
-    raw = raw.strip()
-    if not raw:
-        return ""
-    if "\n" not in raw and "\t" not in raw and not raw.startswith("#"):
-        try:
-            decoded = base64.b64decode(raw).decode("utf-8", errors="ignore")
-            if "\t" in decoded or "youtube.com" in decoded:
-                return decoded.strip()
-        except Exception:
-            pass
-    return raw
+def start_warp_proxy_daemon():
+    """Configura e inicia Cloudflare WARP (wgcf + wireproxy) en 127.0.0.1:11080."""
+    wgcf_bin = shutil.which("wgcf")
+    wp_bin = shutil.which("wireproxy")
+    if not wgcf_bin or not wp_bin:
+        return None
 
+    try:
+        WARP_DIR.mkdir(parents=True, exist_ok=True)
+        profile_conf = WARP_DIR / "wgcf-profile.conf"
 
-def init_persistent_cookies():
-    """Inicializa /tmp/verdedl_session_cookies.txt desde Secret Files o YTDLP_COOKIES."""
-    with COOKIE_LOCK:
-        if PERSISTENT_COOKIE_FILE.is_file() and PERSISTENT_COOKIE_FILE.stat().st_size > 0:
-            return
-        env_raw = _decode_raw_cookies(os.environ.get("YTDLP_COOKIES") or "")
-        if env_raw:
-            PERSISTENT_COOKIE_FILE.write_text(env_raw + "\n", encoding="utf-8")
-            return
-        for p in SECRET_COOKIE_PATHS:
-            if p.is_file() and p.stat().st_size > 0:
-                try:
-                    content = p.read_text(encoding="utf-8", errors="ignore").strip()
-                    if content:
-                        PERSISTENT_COOKIE_FILE.write_text(content + "\n", encoding="utf-8")
-                        return
-                except Exception:
-                    pass
+        if not profile_conf.is_file():
+            account_toml = WARP_DIR / "wgcf-account.toml"
+            if not account_toml.is_file():
+                subprocess.run(
+                    [wgcf_bin, "register", "--accept-tos"],
+                    cwd=str(WARP_DIR),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=20,
+                    check=True,
+                )
+            subprocess.run(
+                [wgcf_bin, "generate"],
+                cwd=str(WARP_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+                check=True,
+            )
+            with open(profile_conf, "a", encoding="utf-8") as f:
+                f.write(f"\n[Socks5]\nBindAddress = 127.0.0.1:{WARP_PROXY_PORT}\n")
 
+        proc = subprocess.Popen(
+            [wp_bin, "-s", "-c", str(profile_conf)],
+            cwd=str(WARP_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
-def get_working_cookie_file(payload_cookies: str, tmpdir: str) -> str | None:
-    """Devuelve una ruta escribible con las cookies activas."""
-    custom = _decode_raw_cookies(payload_cookies)
-    with COOKIE_LOCK:
-        if custom:
-            PERSISTENT_COOKIE_FILE.write_text(custom + "\n", encoding="utf-8")
-        elif not PERSISTENT_COOKIE_FILE.is_file() or PERSISTENT_COOKIE_FILE.stat().st_size == 0:
-            init_persistent_cookies()
+        for _ in range(15):
+            if is_port_open(WARP_PROXY_PORT):
+                print(f"  Túnel Cloudflare WARP activo en {WARP_PROXY_URL}")
+                return proc
+            time.sleep(0.3)
 
-        if PERSISTENT_COOKIE_FILE.is_file() and PERSISTENT_COOKIE_FILE.stat().st_size > 0:
-            local_copy = os.path.join(tmpdir, "cookies.txt")
-            shutil.copyfile(PERSISTENT_COOKIE_FILE, local_copy)
-            return local_copy
-    return None
-
-
-def save_updated_cookie_file(local_copy: str | None):
-    """Guarda de vuelta las cookies rotadas por YouTube tras una petición exitosa."""
-    if not local_copy or not os.path.isfile(local_copy):
-        return
-    with COOKIE_LOCK:
-        try:
-            if os.path.getsize(local_copy) > 0:
-                shutil.copyfile(local_copy, PERSISTENT_COOKIE_FILE)
-        except Exception:
-            pass
+        return proc
+    except Exception as exc:
+        print(f"  [!] No se pudo iniciar Cloudflare WARP: {exc}")
+        return None
 
 
 def start_pot_provider_daemon():
@@ -143,17 +136,59 @@ def start_pot_provider_daemon():
         return None
 
 
+def _decode_raw_cookies(raw: str) -> str:
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if "\n" not in raw and "\t" not in raw and not raw.startswith("#"):
+        try:
+            decoded = base64.b64decode(raw).decode("utf-8", errors="ignore")
+            if "\t" in decoded or "youtube.com" in decoded:
+                return decoded.strip()
+        except Exception:
+            pass
+    return raw
+
+
+def init_persistent_cookies():
+    with COOKIE_LOCK:
+        if PERSISTENT_COOKIE_FILE.is_file() and PERSISTENT_COOKIE_FILE.stat().st_size > 0:
+            return
+        env_raw = _decode_raw_cookies(os.environ.get("YTDLP_COOKIES") or "")
+        if env_raw:
+            PERSISTENT_COOKIE_FILE.write_text(env_raw + "\n", encoding="utf-8")
+            return
+        for p in SECRET_COOKIE_PATHS:
+            if p.is_file() and p.stat().st_size > 0:
+                try:
+                    content = p.read_text(encoding="utf-8", errors="ignore").strip()
+                    if content:
+                        PERSISTENT_COOKIE_FILE.write_text(content + "\n", encoding="utf-8")
+                        return
+                except Exception:
+                    pass
+
+
+def get_working_cookie_file(payload_cookies: str, tmpdir: str) -> str | None:
+    custom = _decode_raw_cookies(payload_cookies)
+    with COOKIE_LOCK:
+        if custom:
+            PERSISTENT_COOKIE_FILE.write_text(custom + "\n", encoding="utf-8")
+        elif not PERSISTENT_COOKIE_FILE.is_file() or PERSISTENT_COOKIE_FILE.stat().st_size == 0:
+            init_persistent_cookies()
+
+        if PERSISTENT_COOKIE_FILE.is_file() and PERSISTENT_COOKIE_FILE.stat().st_size > 0:
+            local_copy = os.path.join(tmpdir, "cookies.txt")
+            shutil.copyfile(PERSISTENT_COOKIE_FILE, local_copy)
+            return local_copy
+    return None
+
+
 def validate_url(url: str) -> bool:
     if not url or not isinstance(url, str):
         return False
     parsed = urllib.parse.urlparse(url.strip())
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
-
-
-def is_youtube_url(url: str) -> bool:
-    host = urllib.parse.urlparse(url).hostname or ""
-    host = host.lower()
-    return "youtube.com" in host or "youtu.be" in host
 
 
 class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
@@ -182,7 +217,7 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                     "status": "ok",
                     "engine": "yt-dlp",
                     "version": get_ytdlp_version(),
-                    "cookies_configured": has_server_cookies(),
+                    "warp_active": is_port_open(WARP_PROXY_PORT),
                 },
             )
             return
@@ -207,59 +242,50 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Ruta no encontrada."})
 
     def _handle_video_info(self, url: str):
-        with tempfile.TemporaryDirectory(prefix="verdedl_info_") as tmpdir:
-            cfile = get_working_cookie_file("", tmpdir)
-            cmd = [
-                "yt-dlp",
-                "--no-js-runtimes",
-                "--js-runtimes",
-                "node",
-                "--impersonate",
-                "chrome",
-                "--dump-single-json",
-                "--no-playlist",
-                "--no-warnings",
-            ]
-            if PLUGIN_DIR.is_dir():
-                cmd.extend(["--plugin-dirs", str(PLUGIN_DIR)])
+        cmd = [
+            "yt-dlp",
+            "--no-js-runtimes",
+            "--js-runtimes",
+            "node",
+            "--dump-single-json",
+            "--no-playlist",
+            "--no-warnings",
+        ]
+        if is_port_open(WARP_PROXY_PORT):
+            cmd.extend(["--proxy", WARP_PROXY_URL])
+        if PLUGIN_DIR.is_dir():
+            cmd.extend(["--plugin-dirs", str(PLUGIN_DIR)])
 
-            if cfile:
-                cmd.extend(["--cookies", cfile])
-                cmd.extend(["--extractor-args", "youtube:player_client=mweb,web"])
-            else:
-                cmd.extend(["--extractor-args", "youtube:player_client=mweb,android_vr"])
-
-            cmd.extend(["--", url])
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=35,
-                    check=False,
-                )
-                if proc.returncode != 0 or not proc.stdout:
-                    self._send_json(
-                        HTTPStatus.BAD_GATEWAY,
-                        {"error": "No se pudo obtener información del enlace."},
-                    )
-                    return
-
-                save_updated_cookie_file(cfile)
-                info = json.loads(proc.stdout)
+        cmd.extend(["--", url])
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=35,
+                check=False,
+            )
+            if proc.returncode != 0 or not proc.stdout:
                 self._send_json(
-                    HTTPStatus.OK,
-                    {
-                        "title": info.get("title") or "Video",
-                        "uploader": info.get("uploader") or info.get("channel") or "",
-                        "thumbnail": info.get("thumbnail") or "",
-                        "duration": info.get("duration") or 0,
-                        "duration_string": info.get("duration_string") or "",
-                        "extractor_key": info.get("extractor_key") or "Video",
-                    },
+                    HTTPStatus.BAD_GATEWAY,
+                    {"error": "No se pudo obtener información del enlace."},
                 )
-            except Exception as exc:
-                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+                return
+
+            info = json.loads(proc.stdout)
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "title": info.get("title") or "Video",
+                    "uploader": info.get("uploader") or info.get("channel") or "",
+                    "thumbnail": info.get("thumbnail") or "",
+                    "duration": info.get("duration") or 0,
+                    "duration_string": info.get("duration_string") or "",
+                    "extractor_key": info.get("extractor_key") or "Video",
+                },
+            )
+        except Exception as exc:
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
     def _build_base_ytdlp_args(
         self,
@@ -349,44 +375,38 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                 output_template=output_template,
             )
 
-            if is_youtube_url(url):
-                if cookies_file:
-                    profiles = [
-                        [
-                            "--cookies",
-                            cookies_file,
-                            "--impersonate",
-                            "chrome",
-                            "--extractor-args",
-                            "youtube:player_client=mweb,web",
-                        ],
-                        [
-                            "--impersonate",
-                            "chrome",
-                            "--extractor-args",
-                            "youtube:player_client=mweb,android_vr",
-                        ],
+            warp_ready = is_port_open(WARP_PROXY_PORT)
+            profiles: list[list[str]] = []
+
+            if warp_ready:
+                # 1. Intento principal: A través de Cloudflare WARP sin cookies (usa clientes nativos tv_samsung + visionos)
+                profiles.append(["--proxy", WARP_PROXY_URL])
+                # 2. Respaldo con WARP + mweb y PO Token
+                profiles.append(
+                    [
+                        "--proxy",
+                        WARP_PROXY_URL,
+                        "--extractor-args",
+                        "youtube:player_client=mweb,android_vr",
                     ]
-                else:
-                    profiles = [
-                        [
-                            "--impersonate",
-                            "chrome",
-                            "--extractor-args",
-                            "youtube:player_client=mweb,android_vr",
-                        ],
-                        [
-                            "--impersonate",
-                            "chrome",
-                            "--extractor-args",
-                            "youtube:player_client=tv_simply,android",
-                        ],
-                    ]
-            else:
-                if cookies_file:
-                    profiles = [["--cookies", cookies_file, "--impersonate", "chrome"], ["--cookies", cookies_file]]
-                else:
-                    profiles = [["--impersonate", "chrome"], []]
+                )
+
+            # 3. Intento directo con PO Token
+            profiles.append(
+                [
+                    "--impersonate",
+                    "chrome",
+                    "--extractor-args",
+                    "youtube:player_client=mweb,android_vr",
+                ]
+            )
+
+            # 4. Solo si los anteriores fallan (ej. video con restricción de edad) y hay cookies disponibles
+            if cookies_file:
+                cookie_flags = ["--cookies", cookies_file, "--extractor-args", "youtube:player_client=mweb,web"]
+                if warp_ready:
+                    profiles.append(["--proxy", WARP_PROXY_URL] + cookie_flags)
+                profiles.append(["--impersonate", "chrome"] + cookie_flags)
 
             errors_collected: list[str] = []
             success = False
@@ -409,7 +429,6 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                     return
 
                 if proc.returncode == 0:
-                    save_updated_cookie_file(cookies_file)
                     success = True
                     break
 
@@ -424,7 +443,6 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
                     errors_collected.append((proc.stderr or proc.stdout).strip().splitlines()[-1])
 
             if not success:
-                # Mostrar el primer error relevante (del perfil con cookies si existía)
                 primary_error = errors_collected[0] if errors_collected else "Error al ejecutar yt-dlp."
                 self._send_json(
                     HTTPStatus.BAD_GATEWAY,
@@ -484,11 +502,12 @@ def main():
 
     init_persistent_cookies()
     print("============================================================")
+    warp_proc = start_warp_proxy_daemon()
     pot_proc = start_pot_provider_daemon()
     server = ThreadingHTTPServer((HOST, PORT), VerdeDLRequestHandler)
     print(f"  VerdeDL Server activo en: http://localhost:{PORT}")
     print(f"  Motor yt-dlp versión:     {get_ytdlp_version()}")
-    print(f"  Cookies en servidor:      {'SÍ' if has_server_cookies() else 'NO'}")
+    print(f"  Túnel Cloudflare WARP:    {'ACTIVO' if is_port_open(WARP_PROXY_PORT) else 'INACTIVO'}")
     print("  Presiona Ctrl+C para detener el servidor.")
     print("============================================================")
     try:
@@ -496,6 +515,8 @@ def main():
     except KeyboardInterrupt:
         print("\nDeteniendo servidor...")
         server.server_close()
+        if warp_proc:
+            warp_proc.terminate()
         if pot_proc:
             pot_proc.terminate()
 
