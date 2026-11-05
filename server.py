@@ -362,7 +362,8 @@ class VerdeDLRequestHandler(SimpleHTTPRequestHandler):
         subtitles = bool(payload.get("subtitles", False))
 
         with tempfile.TemporaryDirectory(prefix="verdedl_") as tmpdir:
-            cookies_file = get_working_cookie_file(str(payload.get("cookiesText") or ""), tmpdir)
+            # Las cookies solo se configuran en el servidor (Secret File / YTDLP_COOKIES), no desde la web
+            cookies_file = get_working_cookie_file("", tmpdir)
 
             output_template = os.path.join(tmpdir, "%(title).120s.%(ext)s")
             base_args = self._build_base_ytdlp_args(
