@@ -61,8 +61,10 @@
     status: $("status"),
     statusIcon: $("statusIcon"),
     statusTitle: $("statusTitle"),
+    statusPercent: $("statusPercent"),
     statusText: $("statusText"),
     statusBar: $("statusBar"),
+    statusBarFill: $("statusBarFill"),
     statusDetails: $("statusDetails"),
     statusRaw: $("statusRaw"),
 
@@ -214,16 +216,40 @@
   // ------------------------------------------------------------------
   // Estado de la descarga
   // ------------------------------------------------------------------
-  function showStatus(kind, title, text, raw) {
+  function showStatus(kind, title, text, raw, percent) {
     els.status.hidden = false;
     els.status.className = `status is-${kind}`;
     els.statusIcon.innerHTML = ICONS[kind] || "";
     els.statusTitle.textContent = title;
     els.statusText.textContent = text || "";
     els.statusBar.hidden = kind !== "loading";
+    if (typeof percent === "number" && percent >= 0) {
+      const clamped = Math.max(0, Math.min(100, percent));
+      els.statusPercent.textContent = `${Math.round(clamped)}%`;
+      els.statusPercent.hidden = false;
+      els.statusBar.classList.add("is-determinate");
+      els.statusBarFill.style.width = `${clamped}%`;
+    } else {
+      els.statusPercent.hidden = true;
+      els.statusBar.classList.remove("is-determinate");
+      els.statusBarFill.style.width = "";
+    }
     els.statusDetails.hidden = !raw;
     els.statusDetails.open = false;
     els.statusRaw.textContent = raw || "";
+  }
+
+  function formatProgressSubtext(data) {
+    const parts = [];
+    if (data.size) parts.push(`Tamaño: ${data.size}`);
+    if (data.speed && data.speed !== "Unknown B/s") parts.push(`Velocidad: ${data.speed}`);
+    if (data.eta && data.eta !== "00:00" && data.eta !== "Unknown") parts.push(`Tiempo restante: ${data.eta}`);
+    if (parts.length) return parts.join(" · ");
+    return state.title ? `«${state.title}»` : "";
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   function friendlyError(raw) {
@@ -255,6 +281,80 @@
     } finally {
       clearTimeout(killer);
       if (slow) clearTimeout(slow);
+    }
+  }
+
+  async function downloadWithProgress(payload) {
+    const startRes = await fetch(`${backendUrl()}/api/download/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    // Si el servidor aún tiene una versión anterior sin /api/download/start, usar modo directo
+    if (startRes.status === 404) {
+      return false;
+    }
+
+    if (!startRes.ok) {
+      let raw = `HTTP ${startRes.status}`;
+      try {
+        const data = await startRes.json();
+        if (data && data.error) raw = data.error;
+      } catch {
+        /* respuesta no JSON */
+      }
+      showStatus("error", "No se pudo iniciar la descarga", friendlyError(raw), raw);
+      return true;
+    }
+
+    const { job_id: jobId } = await startRes.json();
+    const base = backendUrl();
+
+    while (true) {
+      await sleep(500);
+      const progRes = await fetch(`${base}/api/download/progress?id=${encodeURIComponent(jobId)}`, {
+        cache: "no-store",
+      });
+
+      if (!progRes.ok) {
+        let raw = `HTTP ${progRes.status}`;
+        try {
+          const errData = await progRes.json();
+          if (errData && errData.error) raw = errData.error;
+        } catch {
+          /* ignorar */
+        }
+        showStatus("error", "No se pudo descargar", friendlyError(raw), raw);
+        return true;
+      }
+
+      const data = await progRes.json();
+
+      if (data.status === "error") {
+        const raw = data.error || "Error durante la descarga.";
+        showStatus("error", "No se pudo descargar", friendlyError(raw), raw);
+        return true;
+      }
+
+      const pct = typeof data.percent === "number" ? data.percent : 0;
+      const stageTitle = data.stage || "Descargando…";
+      const subtext = formatProgressSubtext(data);
+      showStatus("loading", stageTitle, subtext, "", pct);
+
+      if (data.status === "ready") {
+        showStatus("loading", "Guardando archivo en tu dispositivo…", data.filename || subtext, "", 100);
+        const fileRes = await fetch(`${base}/api/download/file?id=${encodeURIComponent(jobId)}`);
+        if (!fileRes.ok) {
+          showStatus("error", "No se pudo guardar el archivo", "Inténtalo de nuevo.");
+          return true;
+        }
+        const blob = await fileRes.blob();
+        const filename = data.filename || filenameFromHeaders(fileRes.headers) || `descarga.${state.format}`;
+        saveBlob(blob, filename);
+        showStatus("done", "¡Listo!", `Se guardó «${filename}» en tu carpeta de descargas.`, "", 100);
+        return true;
+      }
     }
   }
 
@@ -299,23 +399,37 @@
     const isVideo = state.format === "mp4";
     showStatus(
       "loading",
-      isVideo ? "Preparando tu video…" : "Preparando tu audio…",
-      state.title ? `«${state.title}». Puede tardar un poco según la duración.` : "Puede tardar un poco según la duración."
+      "Analizando enlace del video…",
+      state.title ? `«${state.title}»` : "Obteniendo información de formatos…",
+      "",
+      0
     );
 
+    const payload = {
+      url: state.url,
+      format: state.format,
+      videoQuality: settings.videoQuality,
+      audioQuality: settings.audioQuality,
+      noPlaylist: true,
+      embedMetadata: settings.embedMetadata,
+      subtitles: settings.subtitles,
+    };
+
     try {
+      const handled = await downloadWithProgress(payload);
+      if (handled) return;
+
+      // Respaldo para servidores sin /api/download/start
+      showStatus(
+        "loading",
+        isVideo ? "Preparando tu video…" : "Preparando tu audio…",
+        state.title ? `«${state.title}». Puede tardar un poco según la duración.` : "Puede tardar un poco según la duración."
+      );
+
       const res = await fetch(`${backendUrl()}/api/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: state.url,
-          format: state.format,
-          videoQuality: settings.videoQuality,
-          audioQuality: settings.audioQuality,
-          noPlaylist: true,
-          embedMetadata: settings.embedMetadata,
-          subtitles: settings.subtitles,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
