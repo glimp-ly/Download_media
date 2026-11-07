@@ -259,11 +259,20 @@ def build_base_ytdlp_args(
             )
         args.extend(["--merge-output-format", "mp4"])
     else:
-        valid_aq = audio_quality if audio_quality in ("0", "192K", "128K", "96K") else "0"
-        args.extend(["-x", "--audio-format", "mp3", "--audio-quality", valid_aq])
+        # Priorizar pista de solo audio AAC (.m4a a 44.1 kHz, formato 140) para que la descarga
+        # y la posterior conversión con ffmpeg sean mucho más rápidas que con flujos de video o 48 kHz.
+        args.extend(
+            [
+                "-f",
+                "ba[ext=m4a][abr<=160]/ba[ext=m4a]/ba[abr<=160]/ba/b[height<=360]/b",
+            ]
+        )
 
     if embed_metadata:
-        args.extend(["--embed-thumbnail", "--embed-metadata"])
+        if fmt == "mp4":
+            args.extend(["--embed-thumbnail", "--embed-metadata"])
+        else:
+            args.extend(["--embed-metadata"])
 
     if fmt == "mp4" and subtitles:
         args.extend(["--write-subs", "--embed-subs", "--sub-langs", "es.*,en.*"])
@@ -272,20 +281,33 @@ def build_base_ytdlp_args(
     return args
 
 
-def build_attempt_profiles(cookies_file: str | None) -> list[list[str]]:
+def build_attempt_profiles(cookies_file: str | None, fmt: str = "mp4") -> list[list[str]]:
     warp_ready = is_port_open(WARP_PROXY_PORT)
     profiles: list[list[str]] = []
 
     if warp_ready:
-        profiles.append(["--proxy", WARP_PROXY_URL])
-        profiles.append(
-            [
-                "--proxy",
-                WARP_PROXY_URL,
-                "--extractor-args",
-                "youtube:player_client=mweb,android_vr",
-            ]
-        )
+        if fmt == "mp3":
+            # En modo MP3 priorizamos android_vr y mweb porque entregan pistas directas .m4a (solo audio)
+            # en lugar de los flujos HLS de video+audio combinados de visionos.
+            profiles.append(
+                [
+                    "--proxy",
+                    WARP_PROXY_URL,
+                    "--extractor-args",
+                    "youtube:player_client=android_vr,mweb",
+                ]
+            )
+            profiles.append(["--proxy", WARP_PROXY_URL])
+        else:
+            profiles.append(["--proxy", WARP_PROXY_URL])
+            profiles.append(
+                [
+                    "--proxy",
+                    WARP_PROXY_URL,
+                    "--extractor-args",
+                    "youtube:player_client=mweb,android_vr",
+                ]
+            )
 
     profiles.append(
         [
@@ -345,7 +367,7 @@ def parse_ytdlp_line(job_id: str, line: str, fmt: str, stream_count: int) -> int
 
         # Escalar el porcentaje de forma continua:
         # En MP4 normalmente se descarga video (12%->78%) + audio (78%->92%) + unión ffmpeg (95%)
-        # En MP3 se descarga audio (12%->88%) + conversión a MP3 (95%)
+        # En MP3 se descarga audio ligero .m4a (12%->55%) + conversión rápida a MP3 con progreso en vivo (55%->99%)
         if fmt == "mp4":
             if stream_count <= 1:
                 scaled = 12.0 + (raw_pct * 0.66)
@@ -354,8 +376,8 @@ def parse_ytdlp_line(job_id: str, line: str, fmt: str, stream_count: int) -> int
                 scaled = 78.0 + (raw_pct * 0.14)
                 stage_label = "Descargando audio…"
         else:
-            scaled = 12.0 + (raw_pct * 0.76)
-            stage_label = "Descargando audio…"
+            scaled = 12.0 + (raw_pct * 0.43)
+            stage_label = "Descargando pista de audio…"
 
         size_val = m.group("size") or ""
         speed_val = m.group("speed") or ""
@@ -387,7 +409,7 @@ def parse_ytdlp_line(job_id: str, line: str, fmt: str, stream_count: int) -> int
     elif s.startswith("[ExtractAudio]"):
         update_job(
             job_id,
-            percent=95.0,
+            percent=55.0,
             stage="Convirtiendo audio a formato MP3…",
             speed="",
             eta="",
@@ -402,6 +424,149 @@ def parse_ytdlp_line(job_id: str, line: str, fmt: str, stream_count: int) -> int
         )
 
     return stream_count
+
+
+def probe_duration_us(file_path: Path) -> int:
+    """Obtiene la duración del archivo de audio en microsegundos usando ffprobe."""
+    try:
+        res = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(file_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        val = float((res.stdout or "").strip())
+        if val > 0:
+            return int(val * 1_000_000)
+    except Exception:
+        pass
+    return 0
+
+
+def format_seconds_mmss(seconds: float) -> str:
+    sec = max(0, int(round(seconds)))
+    m, s = divmod(sec, 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h:d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def convert_to_mp3_with_progress(job_id: str, src_file: Path, audio_quality: str) -> Path | None:
+    """Convierte la pista de audio descargada a MP3 de forma rápida reportando progreso en vivo (55% -> 99%)."""
+    dst_file = src_file.with_suffix(".mp3")
+    duration_us = probe_duration_us(src_file)
+
+    # Configurar bitrate/VBR óptimo con el algoritmo rápido de LAME (-compression_level 9)
+    # El audio nativo de YouTube es 128 kbps AAC (.m4a) o ~160 kbps Opus (.webm).
+    # Usar -q:a 0 (VBR ~260 kbps con modelo psicoacústico lento) desperdicia el 0.1 CPU de Render
+    # sin ganar calidad real sobre la fuente de 128 kbps.
+    if audio_quality == "96K":
+        quality_flags = ["-b:a", "96k"]
+    elif audio_quality == "128K":
+        quality_flags = ["-b:a", "128k"]
+    elif audio_quality == "192K":
+        quality_flags = ["-b:a", "192k"]
+    else:
+        # Calidad alta VBR (~165 kbps) + algoritmo rápido LAME
+        quality_flags = ["-q:a", "4"]
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src_file),
+        "-vn",
+        "-sn",
+        "-dn",
+        "-c:a",
+        "libmp3lame",
+        "-compression_level",
+        "9",
+        "-ar",
+        "44100",
+        *quality_flags,
+        "-map_metadata",
+        "0",
+        "-id3v2_version",
+        "3",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        str(dst_file),
+    ]
+
+    update_job(
+        job_id,
+        percent=55.0,
+        stage="Convirtiendo audio a formato MP3…",
+        speed="",
+        eta="",
+    )
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert proc.stdout is not None
+        current_speed_str = ""
+        current_speed_factor = 0.0
+
+        for raw_line in proc.stdout:
+            line = raw_line.strip()
+            if line.startswith("speed="):
+                sp = line.split("=", 1)[1].strip()
+                if sp and sp != "N/A":
+                    current_speed_str = sp
+                    try:
+                        current_speed_factor = float(sp.rstrip("x"))
+                    except ValueError:
+                        current_speed_factor = 0.0
+            elif line.startswith("out_time_us=") and duration_us > 0:
+                val_str = line.split("=", 1)[1].strip()
+                if val_str.isdigit():
+                    out_us = int(val_str)
+                    conv_pct = min(100.0, max(0.0, (out_us / duration_us) * 100.0))
+                    overall_pct = round(55.0 + (conv_pct * 0.44), 1)
+                    eta_str = ""
+                    if current_speed_factor > 0.05 and out_us < duration_us:
+                        rem_sec = ((duration_us - out_us) / 1_000_000.0) / current_speed_factor
+                        eta_str = format_seconds_mmss(rem_sec)
+                    update_job(
+                        job_id,
+                        percent=min(99.0, overall_pct),
+                        raw_percent=round(conv_pct, 1),
+                        stage="Convirtiendo audio a formato MP3…",
+                        speed=current_speed_str,
+                        eta=eta_str,
+                    )
+
+        proc.wait(timeout=600)
+        if proc.returncode == 0 and dst_file.is_file() and dst_file.stat().st_size > 0:
+            try:
+                if src_file != dst_file:
+                    src_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return dst_file
+    except Exception:
+        pass
+
+    return None
 
 
 def run_download_job(job_id: str, payload: dict):
@@ -429,7 +594,7 @@ def run_download_job(job_id: str, payload: dict):
         output_template=output_template,
     )
 
-    profiles = build_attempt_profiles(cookies_file)
+    profiles = build_attempt_profiles(cookies_file, fmt=fmt)
     errors_collected: list[str] = []
     success = False
 
@@ -509,6 +674,18 @@ def run_download_job(job_id: str, payload: dict):
 
     matching = [p for p in files if p.suffix.lower() == f".{fmt}"]
     target_file = matching[0] if matching else max(files, key=lambda p: p.stat().st_size)
+
+    if fmt == "mp3" and target_file.suffix.lower() != ".mp3":
+        converted = convert_to_mp3_with_progress(job_id, target_file, audio_quality)
+        if not converted or not converted.is_file():
+            update_job(
+                job_id,
+                status="error",
+                stage="Error al convertir a MP3",
+                error="No se pudo convertir el archivo de audio a formato MP3.",
+            )
+            return
+        target_file = converted
 
     update_job(
         job_id,
